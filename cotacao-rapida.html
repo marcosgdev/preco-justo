@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zé Preços - Cotação Rápida</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <header class="header">
+        <div class="logo-container">
+            <img src="img/Divisão de Compras.png" alt="Logotipo da Divisão de Compras" class="logo">
+            <div class="title-container">
+                <h1>DIVISÃO DE COMPRAS</h1>
+                <h2>A tecnologia a serviço da gestão pública</h2>
+            </div>
+        </div>
+    </header>
+
+    <div class="main-content">   
+        <section class="form-section">
+            <div class="form-header">
+                <h2>Zé Preços</h2>
+                <p>O Zé Preços consulta as médias de preço de itens e serviços do Governo Federal para você. <br> O resultado será exibido em uma tabela abaixo em poucos segundos!</p>
+                Consulte aqui o 
+                <a href="https://catalogo.compras.gov.br/cnbs-web/busca" target="_blank" rel="noopener noreferrer">
+    Catálogo de Materiais e Serviços
+                </a> 
+do ComprasGov
+            </div>
+
+            <form class="price-form">
+                <div class="form-group">
+                    <label for="catmat_code">Código CATMAT</label>
+                    <input type="text" id="catmat_code" name="catmat_code">
+                    <span class="form-hint">O Código CATMAT é o código do item de material.</span>
+                </div>
+                <div class="form-group">
+                    <label for="catser_code">Código CATSER</label>
+                    <input type="text" id="catser_code" name="catser_code">
+                    <span class="form-hint">O Código CATSER é o código do item de serviço.</span>
+                </div>
+                <button type="submit" class="submit-button">SOLICITAR PESQUISA</button>
+                  <a href="index.html" class="back-button">VOLTAR AO MENU PRINCIPAL</a>
+                  <button type="button" class="export-button" id="export-xlsx">EXPORTAR XLSX</button>
+                  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+            </form>
+            <div id="results-container"></div>
+        </section>
+
+        </div>
+
+    <footer class="footer">
+        <p>© 2025 Divisão de Compras</p>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>
