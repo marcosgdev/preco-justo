@@ -1,59 +1,63 @@
-Zé Preços – Versão 1 (Em Construção)
-O Zé Preços é uma ferramenta online gratuita para consulta e análise de preços de itens e serviços no ComprasGov. Desenvolvida para apoiar compradores públicos, analistas e gestores, a solução ainda está em fase inicial (Versão 1) e em constante evolução para inclusão de novas funcionalidades.
+# Zé Preços · **Versão 1**  _(em construção)_
 
-🚀 Funcionalidades
-Consulta automática às médias de preços de materiais (CATMAT) e serviços (CATSER).
+> Ferramenta online gratuita para consulta e análise de preços de itens e serviços no **ComprasGov**.  
+> Focada em apoiar compradores públicos, analistas e gestores. Esta é a **primeira versão** e está em evolução contínua.
 
-Identificação de outliers com destaque visual na tabela.
+---
 
-Classificação dos valores por Curvas de Mercado (A, B, C).
+## 🚀 Funcionalidades
 
-Recomendação automática da curva mais estável (CV ≤ 25% e ≥ 3 contratações).
+- Consulta automática às médias de preços de **materiais (CATMAT)** e **serviços (CATSER)**  
+- Destaque visual de **outliers** (valores fora do padrão)  
+- Classificação por **Curvas de Mercado (A, B, C)**  
+- **Recomendação automática** da curva mais estável (**CV ≤ 25%** e **≥ 3** contratações)  
+- **Resumo inteligente** com métricas agregadas  
+- Exibição de **nome da UASG**, **código UASG**, **fornecedor** e **link direto** da compra  
+- Exportação para **Excel (.xlsx)** com abas por curva  
+- Interface **responsiva** e fácil de usar
 
-Resumo inteligente com métricas agregadas.
+---
 
-Exibição do nome da UASG e detalhes da contratação.
+## 📦 Tecnologias
 
-Exportação dos resultados para planilha Excel (.xlsx).
+- **Front-end:** HTML5, CSS3, JavaScript  
+- **Back-end:** Google Apps Script (integração com dados do ComprasGov)  
+- **Planilhas:** SheetJS (`xlsx`)  
+- **Comunicação:** `fetch` (POST) para o endpoint `exec` do Apps Script
 
-Interface responsiva e fácil de usar.
+---
 
-📦 Tecnologias Utilizadas
-HTML5, CSS3 e JavaScript para interface.
+## 📄 Como usar
 
-Google Apps Script para backend e integração com dados do ComprasGov.
+1. Acesse a aplicação hospedada (link público).  
+2. Informe **apenas um** dos códigos: **CATMAT** _ou_ **CATSER**.  
+3. Clique em **Solicitar Pesquisa**.  
+4. Analise o **resumo**, as **curvas** e os **outliers** destacados.  
+5. (Opcional) Clique em **Exportar XLSX** para baixar a planilha.
 
-SheetJS (xlsx.js) para geração de planilhas.
 
-Fetch API para comunicação assíncrona.
+---
 
-📄 Como Usar
-Acesse a aplicação hospedada (link público).
+## 📝 Critérios de recomendação de curva
 
-Informe apenas um dos códigos: CATMAT ou CATSER.
-
-Clique em Solicitar Pesquisa.
-
-Analise o resumo, as curvas de mercado e os outliers destacados.
-
-(Opcional) Clique em Exportar XLSX para baixar a planilha.
-
-📝 Critérios para Recomendação de Curva
 A ferramenta recomenda uma curva quando:
+- **CV (coeficiente de variação) ≤ 25%**; e
+- **Número de contratações ≥ 3**.
 
-O coeficiente de variação (CV) é menor ou igual a 25%.
+A curva recomendada aparece com um **cartão** e um **selo** de “Recomendada” na interface.
 
-Há pelo menos 3 contratações na curva.
+---
 
-⚠️ Aviso – Versão 1
-Esta é a primeira versão do Zé Preços.
-Algumas funcionalidades ainda estão em testes e podem sofrer ajustes. Sugestões e feedbacks são bem-vindos para aprimorar o sistema.
+## ⚠️ Aviso — Versão 1
 
-📂 Estrutura do Projeto
-bash
-Copiar
-Editar
-/index.html      → Página principal
-/style.css       → Estilos da interface
-/script.js       → Lógica da aplicação e integração com backend
-/img/            → Logos e imagens
+Esta é a **primeira versão** do Zé Preços.  
+Algumas funcionalidades ainda estão em testes e podem sofrer ajustes. **Sugestões e feedbacks são muito bem-vindos.**
+
+---
+
+## 📂 Estrutura do projeto
+
+/index.html → Página principal
+/style.css → Estilos da interface (inclui cartões, selos e tabela)
+/script.js → Lógica de busca, agrupamento por curvas, outliers e exportação
+/img/ → Logos e imagens
