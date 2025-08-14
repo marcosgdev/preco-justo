@@ -25,36 +25,92 @@
                 <p>O Zé Preços consulta as médias de preço de itens e serviços do Governo Federal para você. <br> O resultado será exibido em uma tabela abaixo em poucos segundos!</p>
                 Consulte aqui o 
                 <a href="https://catalogo.compras.gov.br/cnbs-web/busca" target="_blank" rel="noopener noreferrer">
-    Catálogo de Materiais e Serviços
+                    Catálogo de Materiais e Serviços
                 </a> 
-do ComprasGov
+                do ComprasGov
             </div>
 
             <form class="price-form">
                 <div class="form-group">
                     <label for="catmat_code">Código CATMAT</label>
-                    <input type="text" id="catmat_code" name="catmat_code">
+                    <input type="text" id="catmat_code" name="catmat_code" autocomplete="off">
                     <span class="form-hint">O Código CATMAT é o código do item de material.</span>
                 </div>
                 <div class="form-group">
                     <label for="catser_code">Código CATSER</label>
-                    <input type="text" id="catser_code" name="catser_code">
+                    <input type="text" id="catser_code" name="catser_code" autocomplete="off">
                     <span class="form-hint">O Código CATSER é o código do item de serviço.</span>
                 </div>
                 <button type="submit" class="submit-button">SOLICITAR PESQUISA</button>
-                  <a href="index.html" class="back-button">VOLTAR AO MENU PRINCIPAL</a>
-                  <button type="button" class="export-button" id="export-xlsx">EXPORTAR XLSX</button>
-                  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+                <a href="index.html" class="back-button">VOLTAR AO MENU PRINCIPAL</a>
             </form>
+
+            <div id="results-container"></div>
+
+            <!-- Botão de análise: agora será “amarrado” via JS para garantir storeKey/type/code -->
             <div id="results-container"></div>
         </section>
-
-        </div>
+    </div>
 
     <footer class="footer">
         <p>© 2025 Divisão de Compras</p>
     </footer>
 
+    <!-- Seu JS principal (use a versão corrigida que te enviei) -->
     <script src="script.js"></script>
+
+    <!-- Amarração do botão "Ir para Análise de Mercado" -->
+    <script>
+      (function(){
+        // Util: leitura segura de JSON
+        function readJSON(s){ if(!s) return null; try { return JSON.parse(s); } catch(_){ return null; } }
+
+        document.addEventListener('DOMContentLoaded', () => {
+          const go = document.getElementById('go-analysis');
+          if (!go) return;
+
+          go.addEventListener('click', (ev) => {
+            ev.preventDefault();
+
+            // 1) Tenta recuperar o último payload salvo pelo script principal
+            let payload = readJSON(sessionStorage.getItem('ze-precos:last'));
+
+            // 2) Se não houver, mas já temos dados na página atual, monta um payload mínimo
+            //    usando os campos do formulário + window.__lastData (preenchido pelo script principal).
+            //    Obs.: __lastData é alimentado após a pesquisa bem-sucedida.
+            const catmat = document.getElementById('catmat_code')?.value.trim() || '';
+            const catser = document.getElementById('catser_code')?.value.trim() || '';
+            const type = catmat ? 'catmat' : (catser ? 'catser' : (payload?.type || null));
+            const code = catmat || catser || (payload?.code || null);
+
+            if (!payload && window.__lastData && type && code) {
+              payload = { ts: Date.now(), type, code, data: window.__lastData };
+            }
+
+            // 3) Monta querystring e garante salvamento em session/localStorage
+            const qs = new URLSearchParams();
+
+            if (payload && payload.type && payload.code && payload.data) {
+              // garante que a análise terá acesso, mesmo em outra aba
+              const storeKey = `ze-precos:last:${payload.type}:${payload.code}`;
+              sessionStorage.setItem('ze-precos:last', JSON.stringify(payload));  // mesma aba
+              try { localStorage.setItem(storeKey, JSON.stringify(payload)); } catch(_) {}
+
+              qs.set('type', payload.type);
+              qs.set('code', payload.code);
+              qs.set('storeKey', storeKey);
+            } else {
+              // fallback: manda só type/code; a página de análise reconsulta o backend
+              if (type) qs.set('type', type);
+              if (code) qs.set('code', code);
+            }
+
+            const url = 'analise-mercado.html' + (qs.toString() ? ('?' + qs.toString()) : '');
+            // Mesma aba preserva sessionStorage por origem (recomendado)
+            window.location.assign(url);
+          });
+        });
+      })();
+    </script>
 </body>
 </html>

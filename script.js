@@ -1,56 +1,86 @@
-document.addEventListener('DOMContentLoaded', () => { 
+document.addEventListener('DOMContentLoaded', () => {
   const form = document.querySelector('.price-form');
   const resultsContainer = document.getElementById('results-container');
+
+  if (!form || !resultsContainer) {
+    console.error('Form (.price-form) ou #results-container não encontrados.');
+    return;
+  }
 
   const loadingMessage = document.createElement('div');
   loadingMessage.classList.add('loading-message', 'hidden');
   loadingMessage.textContent = 'Aguarde, sua pesquisa está sendo processada...';
   form.parentNode.insertBefore(loadingMessage, form.nextSibling);
 
-  // Botão Exportar XLSX (se existir no HTML)
-  const exportBtn = document.getElementById('export-xlsx');
-  if (exportBtn) exportBtn.addEventListener('click', exportXlsx);
+  // URL da sua página de Análise de Mercado
+  const ANALYSIS_URL = 'analise-mercado.html';
 
-  // Seu endpoint atual
+  // Endpoint do GAS
   const BACKEND_URL = 'https://script.google.com/macros/s/AKfycbxGKxAHwAoy2w5WTd4viQ0SE-JF4amzsW3IPrKg2Zgox6cSv7i-rLmApD2OQ65rogND/exec';
+
+  // Controle para cancelar requisições em voo
+  let inflightCtrl = null;
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
+
+    // Cancela chamada anterior (se houver)
+    if (inflightCtrl) inflightCtrl.abort();
+    inflightCtrl = new AbortController();
+
     clearMessages();
     clearErrors();
     resultsContainer.innerHTML = '';
+
+    // limpa estados
     window.__lastSummary  = '';
     window.__curveMeta    = null;
     window.__lastData     = null;
     window.__curveStats   = null;
     window.__recommended  = null;
 
-    const catmatCode = document.getElementById('catmat_code').value.trim();
-    const catserCode = document.getElementById('catser_code').value.trim();
-    
+    // remove botões anteriores (análise + export)
+    removeGoToAnalysisButton();
+
+    const btnSubmit = form.querySelector('[type="submit"]');
+    if (btnSubmit) btnSubmit.disabled = true;
+
+    const catmatCode = document.getElementById('catmat_code')?.value.trim() || '';
+    const catserCode = document.getElementById('catser_code')?.value.trim() || '';
+
     let isValid = true;
-    if (catmatCode.length > 0 && catserCode.length > 0) {
-      showError('Preencha somente um dos campos (CATMAT ou CATSER).', document.getElementById('catmat_code').parentNode);
-      showError('Preencha somente um dos campos (CATSER).', document.getElementById('catser_code').parentNode);
+    if (catmatCode && catserCode) {
+      showError('Preencha somente um dos campos (CATMAT ou CATSER).', document.getElementById('catmat_code')?.parentNode);
+      showError('Preencha somente um dos campos (CATSER).', document.getElementById('catser_code')?.parentNode);
       isValid = false;
     }
-    if (catmatCode.length === 0 && catserCode.length === 0) {
-      showError('Preencha pelo menos um dos campos (CATMAT ou CATSER).', document.getElementById('catmat_code').parentNode);
+    if (!catmatCode && !catserCode) {
+      showError('Preencha pelo menos um dos campos (CATMAT ou CATSER).', document.getElementById('catmat_code')?.parentNode);
       isValid = false;
     }
-    if (!isValid) return;
+    if (!isValid) {
+      if (btnSubmit) btnSubmit.disabled = false;
+      return;
+    }
 
     const formData = new URLSearchParams();
-    if (catmatCode.length > 0) {
-      formData.append('catmat_code', catmatCode);
-    } else {
-      formData.append('catser_code', catserCode);
-    }
+    const type = catmatCode ? 'catmat' : 'catser';
+    const code = catmatCode || catserCode;
+
+    if (type === 'catmat') formData.append('catmat_code', code);
+    else formData.append('catser_code', code);
 
     loadingMessage.classList.remove('hidden');
 
     try {
-      const response = await fetch(BACKEND_URL, { method: 'POST', body: formData });
+      const response = await fetch(BACKEND_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+        body: formData,
+        signal: inflightCtrl.signal
+      });
+
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
 
       // Guarda tudo para exportação e render
@@ -60,42 +90,59 @@ document.addEventListener('DOMContentLoaded', () => {
       window.__curveStats  = data.curveStats || null;
       window.__recommended = data.recommended || null;
 
-      if (data.success && Array.isArray(data.precos)) {
+      // sucesso somente com pelo menos um registro (tabela visível)
+      if (data.success && Array.isArray(data.precos) && data.precos.length > 0) {
         displayResults(data.precos);
+
+        // salva contexto da última pesquisa em sessionStorage e localStorage (compartilha entre abas)
+        const payload = { ts: Date.now(), type, code, data };
+        const storeKey = `ze-precos:last:${type}:${code}`;
+        sessionStorage.setItem('ze-precos:last', JSON.stringify(payload));
+        try { localStorage.setItem(storeKey, JSON.stringify(payload)); } catch (_) {}
+
+        // Atualiza card de análise (mesma página), se existir
+        renderMarketAnalysisCard(data);
+
+        // Cria os botões (Exportar XLSX + Ir para Análise) ao final da tabela
+        renderActionsRow({ type, code, storeKey });
       } else {
         showError(data.message || 'Sem resultados.');
       }
     } catch (error) {
-      console.error('Erro ao enviar o formulário:', error);
-      showError('Ocorreu um erro ao conectar com o servidor. Tente novamente mais tarde.');
+      if (error.name !== 'AbortError') {
+        console.error('Erro ao enviar o formulário:', error);
+        showError('Ocorreu um erro ao conectar com o servidor. Tente novamente mais tarde.');
+      }
     } finally {
       loadingMessage.classList.add('hidden');
+      if (btnSubmit) btnSubmit.disabled = false;
+      inflightCtrl = null;
     }
   });
 
-  // --- Renderização ---
+  // ---------- Render tabela ----------
   function displayResults(precos) {
     if (!precos || precos.length === 0) {
       resultsContainer.innerHTML = '<p>Nenhum resultado encontrado.</p>';
       return;
     }
 
-    // Agrupar por curva
     const groups = { A: [], B: [], C: [], 'N/D': [] };
-    precos.forEach(p => { groups[p.curva || 'N/D'].push(p); });
+    precos.forEach(p => {
+      const k = (p && typeof p.curva === 'string' && ['A','B','C'].includes(p.curva)) ? p.curva : 'N/D';
+      groups[k].push(p);
+    });
 
     let html = '';
 
-    // Cartão de resumo (se houver)
     if (window.__lastSummary) {
       html += `
-        <div class="results-summary">
+        <div class="results-summary" aria-live="polite">
           <strong>Resumo:</strong> ${escapeHTML(window.__lastSummary)}
         </div>
       `;
     }
 
-    // Cartão de recomendação (se houver)
     if (window.__recommended && window.__recommended.curve) {
       const rec = window.__recommended;
       const cvTxt = (rec.stats?.cv != null) ? `${Number(rec.stats.cv).toFixed(1)}%` : 'N/D';
@@ -118,7 +165,6 @@ document.addEventListener('DOMContentLoaded', () => {
       `;
     }
 
-    // Cabeçalho de curvas (metadados)
     const meta = window.__curveMeta;
     if (meta && typeof meta.t1 === 'number' && typeof meta.t2 === 'number') {
       const t1 = meta.t1.toLocaleString('pt-BR', { style:'currency', currency:'BRL' });
@@ -132,7 +178,6 @@ document.addEventListener('DOMContentLoaded', () => {
       `;
     }
 
-    // Render de cada curva na ordem A, B, C, N/D
     ['A','B','C','N/D'].forEach(curva => {
       const arr = groups[curva];
       if (!arr || arr.length === 0) return;
@@ -172,9 +217,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const trClass = isOut ? ' class="outlier-row"' : '';
         const titleRow = isOut ? ' title="Valor fora do padrão (outlier)"' : '';
 
+        const href = item.linkCompra ? safeURL(item.linkCompra) : null;
         const idContent = item.idCompra
-          ? (item.linkCompra
-              ? `<a href="${item.linkCompra}" target="_blank" rel="noopener noreferrer">${escapeHTML(item.idCompra.toString())}</a>`
+          ? (href
+              ? `<a href="${href}" target="_blank" rel="noopener noreferrer">${escapeHTML(item.idCompra.toString())}</a>`
               : `${escapeHTML(item.idCompra.toString())}`)
           : 'N/A';
 
@@ -197,7 +243,92 @@ document.addEventListener('DOMContentLoaded', () => {
     resultsContainer.innerHTML = html;
   }
 
-  // --- Utilidades ---
+  // ---------- Card "Análise de Mercado" (na mesma página, se existir) ----------
+  function renderMarketAnalysisCard(data){
+    const el = document.querySelector('#card-analise-mercado');
+    if (!el) return;
+
+    if (data.marketAnalysisHtml){
+      el.innerHTML = sanitizeHTML(data.marketAnalysisHtml);
+      return;
+    }
+
+    const stats = data.stats || {};
+    const rec   = data.recommended || null;
+    const curves= data.curves || { counts: {} };
+    const cv = (stats.mean && stats.std) ? ((stats.std / stats.mean) * 100) : null;
+
+    const recHtml = rec?.curve ? `
+      <div class="recommendation-inline">
+        <span class="recommendation-badge">Recomendada: Curva ${escapeHTML(rec.curve)}</span>
+        ${rec.reason ? `<small class="muted">(${escapeHTML(rec.reason)})</small>` : ''}
+      </div>` : '';
+
+    el.innerHTML = `
+      <div class="analysis-card">
+        <div class="analysis-card__title">Análise de Mercado</div>
+        ${recHtml}
+        <ul class="analysis-kpis">
+          <li><span>Média</span><strong>${fmtBRL(stats.mean)}</strong></li>
+          <li><span>Mediana</span><strong>${fmtBRL(stats.median)}</strong></li>
+          <li><span>CV%</span><strong>${cv!=null ? cv.toFixed(1)+'%' : 'N/D'}</strong></li>
+          <li><span>Registros</span><strong>${stats.n ?? 'N/D'}</strong></li>
+          <li><span>Outliers</span><strong>${stats.outliersCount ?? 'N/D'}</strong></li>
+        </ul>
+        <div class="analysis-curves">
+          <span>Curvas (A/B/C):</span>
+          <strong>${(curves.counts?.A || 0)} / ${(curves.counts?.B || 0)} / ${(curves.counts?.C || 0)}</strong>
+        </div>
+        ${data.summary ? `<p class="analysis-summary">${escapeHTML(data.summary)}</p>` : ''}
+      </div>
+    `;
+  }
+
+  // ---------- Botões (Exportar + Análise) ----------
+  function renderActionsRow({ type, code, storeKey }){
+    removeGoToAnalysisButton(); // evita duplicar
+
+    const wrap = document.createElement('div');
+    wrap.className = 'actions-row';
+
+    // Botão Exportar XLSX (herda estilo do seu botão base; ajuste classe se quiser)
+    const btnExport = document.createElement('button');
+    btnExport.type = 'button';
+    btnExport.className = 'submit-button btn-export-xlsx';
+    btnExport.textContent = 'Exportar XLSX';
+    btnExport.addEventListener('click', async () => {
+      try {
+        await ensureXlsxLoaded();
+        exportXlsx();
+      } catch (e) {
+        console.error(e);
+      }
+    });
+
+    // Botão Ir para Análise
+    const q = new URLSearchParams({ type, code, storeKey: storeKey || '' });
+    const btnAnalyze = document.createElement('a');
+    btnAnalyze.className = 'submit-button btn-go-analysis';
+    btnAnalyze.href = `${ANALYSIS_URL}?${q.toString()}`;
+    btnAnalyze.target = '_self';
+    btnAnalyze.rel = 'noopener';
+    btnAnalyze.textContent = 'Ir para Análise de Mercado';
+
+    // ordem: Exportar | Análise (ajuste se preferir)
+    wrap.appendChild(btnExport);
+    wrap.appendChild(btnAnalyze);
+    resultsContainer.appendChild(wrap);
+  }
+
+  // remove antigo container (compatível com versões anteriores)
+  function removeGoToAnalysisButton(){
+    const oldRow = document.querySelector('.actions-row');
+    if (oldRow && oldRow.parentNode) oldRow.parentNode.removeChild(oldRow);
+    const old = document.querySelector('.go-analysis-wrap');
+    if (old && old.parentNode) old.parentNode.removeChild(old);
+  }
+
+  // ---------- Utilidades ----------
   function clearMessages() {
     const messages = document.querySelectorAll('.success-message, .warning-message, .error-message-global');
     messages.forEach(msg => msg.remove());
@@ -206,11 +337,10 @@ document.addEventListener('DOMContentLoaded', () => {
   function clearErrors() {
     const errorDivs = document.querySelectorAll('.form-group.error');
     errorDivs.forEach(div => div.classList.remove('error'));
-
     const errorMessages = document.querySelectorAll('.form-group .error-message');
     errorMessages.forEach(msg => msg.remove());
   }
-  
+
   function showError(message, element) {
     if (element) {
       element.classList.add('error');
@@ -226,15 +356,70 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // Sanitização simples para campos de texto inseridos no HTML
   function escapeHTML(str){
     if (str === null || str === undefined) return '';
-    return String(str)
-      .replaceAll('&','&amp;')
-      .replaceAll('<','&lt;')
-      .replaceAll('>','&gt;')
-      .replaceAll('"','&quot;')
-      .replaceAll("'",'&#039;');
+    const map = { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#039;' };
+    return String(str).replace(/[&<>"']/g, ch => map[ch]);
+  }
+
+  function fmtBRL(n){
+    if (typeof n !== 'number' || !isFinite(n)) return 'N/D';
+    return n.toLocaleString('pt-BR', { style:'currency', currency:'BRL' });
+  }
+
+  function safeURL(url) {
+    try {
+      const u = new URL(url, location.origin);
+      if (!/^https?:$/.test(u.protocol)) return null;
+      const host = u.hostname.toLowerCase();
+      if (host === '127.0.0.1' || host === 'localhost') return null;
+      return u.href;
+    } catch (_) { return null; }
+  }
+
+  function sanitizeHTML(html) {
+    const t = document.createElement('template');
+    t.innerHTML = html || '';
+    t.content.querySelectorAll('script').forEach(s => s.remove());
+    t.content.querySelectorAll('*').forEach(el => {
+      [...el.attributes].forEach(attr => {
+        if (attr.name.toLowerCase().startsWith('on')) el.removeAttribute(attr.name);
+      });
+      if (el.tagName === 'A' && el.hasAttribute('href')) {
+        const h = safeURL(el.getAttribute('href'));
+        if (h) {
+          el.setAttribute('href', h);
+          el.setAttribute('rel','noopener noreferrer');
+          el.setAttribute('target','_blank');
+        } else {
+          el.removeAttribute('href');
+        }
+      }
+      if (el.tagName === 'IMG' && el.hasAttribute('src')) {
+        const src = el.getAttribute('src');
+        const ok = /^https?:/i.test(src) || src.startsWith('/') || src.startsWith('./');
+        if (!ok) el.removeAttribute('src');
+        el.setAttribute('loading','lazy');
+        el.setAttribute('decoding','async');
+      }
+    });
+    return t.innerHTML;
+  }
+
+  // Carrega SheetJS caso não esteja presente
+  function ensureXlsxLoaded(){
+    return new Promise((resolve, reject) => {
+      if (typeof XLSX !== 'undefined') return resolve();
+      const src = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+      const s = document.createElement('script');
+      s.src = src;
+      s.onload = () => resolve();
+      s.onerror = () => {
+        showError('Não foi possível carregar a biblioteca XLSX. Verifique sua conexão.');
+        reject(new Error('Falha ao carregar XLSX'));
+      };
+      document.head.appendChild(s);
+    });
   }
 
   /* ================== EXPORTAÇÃO XLSX ================== */
@@ -245,13 +430,12 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
     if (typeof XLSX === 'undefined') {
-      alert('Biblioteca XLSX não encontrada. Inclua <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script> no HTML.');
+      alert('Biblioteca XLSX não encontrada.');
       return;
     }
 
     const wb = XLSX.utils.book_new();
 
-    // Sheet Resumo (+ recomendação)
     const stats = d.stats || {};
     const curves = d.curves || { counts: {} };
     const rec = d.recommended || null;
@@ -271,7 +455,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const wsResumo = XLSX.utils.aoa_to_sheet(resumo);
     XLSX.utils.book_append_sheet(wb, wsResumo, 'Resumo');
 
-    // Aba de estatísticas por curva (se vier do backend)
     if (d.curveStats) {
       const s = d.curveStats;
       const statsHeader = ['Curva','n','Média','Mediana','Desvio Padrão','CV%'];
@@ -285,59 +468,57 @@ document.addEventListener('DOMContentLoaded', () => {
       XLSX.utils.book_append_sheet(wb, wsCS, 'Curvas-Stats');
     }
 
-    const fmtBRL = n => (typeof n === 'number') ? n : (n || null);
-    const fmtDate = iso => {
+    // datas/números em tipos nativos
+    const excelDate = iso => {
       if (!iso) return null;
-      const dt = new Date(iso);
-      if (isNaN(+dt)) return iso;
-      return dt.toLocaleDateString('pt-BR');
+      const d = new Date(iso);
+      return isNaN(+d) ? null : d;
     };
 
     const header = [
-      'ID Compra',
-      'Descrição do Item',
-      'Preço Unitário',
-      'Quantidade',
-      'Data da Compra',
-      'Fornecedor',
-      'Código UASG',
-      'Nome da UASG',
-      'Estado',
-      'Outlier',
-      'Curva',
-      'Link Compra'
+      'ID Compra','Descrição do Item','Preço Unitário','Quantidade','Data da Compra',
+      'Fornecedor','Código UASG','Nome da UASG','Estado','Outlier','Curva','Link Compra'
     ];
 
     const toRows = arr => arr.map(it => ([
       it.idCompra || '',
       it.descricaoItem || '',
-      fmtBRL(it.precoUnitario),
-      (it.quantidade ?? ''),
-      fmtDate(it.dataCompra),
+      (typeof it.precoUnitario === 'number' ? it.precoUnitario : null),
+      (it.quantidade ?? null),
+      excelDate(it.dataCompra),
       it.nomeFornecedor || '',
       it.codigoUasg || '',
       it.nomeUasg || '',
       it.estado || '',
       it.isOutlier ? 'Sim' : 'Não',
       it.curva || '',
-      it.linkCompra || ''
+      safeURL(it.linkCompra) || ''
     ]));
 
-    // Todos os resultados
     const wsAll = XLSX.utils.aoa_to_sheet([header, ...toRows(d.precos)]);
+    wsAll['!cols'] = [
+      {wch:12},{wch:60},{wch:14},{wch:12},{wch:14},
+      {wch:32},{wch:12},{wch:28},{wch:10},{wch:10},{wch:8},{wch:24}
+    ];
     XLSX.utils.book_append_sheet(wb, wsAll, 'Resultados');
 
-    // Abas por Curva
     const groups = { A: [], B: [], C: [], 'N/D': [] };
-    d.precos.forEach(p => groups[p.curva || 'N/D'].push(p));
+    d.precos.forEach(p => {
+      const k = (p && typeof p.curva === 'string' && ['A','B','C'].includes(p.curva)) ? p.curva : 'N/D';
+      groups[k].push(p);
+    });
+
     ['A','B','C'].forEach(curva => {
       const arr = groups[curva];
       if (!arr || arr.length === 0) return;
       const ws = XLSX.utils.aoa_to_sheet([header, ...toRows(arr)]);
+      ws['!cols'] = wsAll['!cols'];
       XLSX.utils.book_append_sheet(wb, ws, `Curva ${curva}`);
     });
+
     if (groups['N/D'] && groups['N/D'].length) {
       const wsND = XLSX.utils.aoa_to_sheet([header, ...toRows(groups['N/D'])]);
+      wsND['!cols'] = wsAll['!cols'];
       XLSX.utils.book_append_sheet(wb, wsND, 'Curva ND');
     }
 
