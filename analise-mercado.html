@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Zé Preços — Análise de Mercado</title>
+
+<!-- Chart.js (grátis via CDN) -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+<style>
+  :root{
+    --primary:#0A3C6B;
+    --primary-700:#072c50;
+    --green:#4CAF50;
+    --muted:#6b7280;
+    --bg:#f6f8fb;
+    --card:#fff;
+    --border:#e5e7eb;
+    --shadow:0 8px 24px rgba(2,12,27,.08);
+    --radius:14px;
+  }
+  body{
+    margin:0; background:var(--bg); color:#1f2937;
+    font: 500 15px/1.5 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+  }
+  header{
+    background:#fff; border-bottom:3px solid var(--green);
+    padding:16px 20px; position:sticky; top:0; z-index:10;
+  }
+  header h1{ margin:0; font-size:20px; color:var(--primary); }
+  .wrap{ max-width:1100px; margin:24px auto; padding:0 16px; }
+
+  .grid{
+    display:grid; gap:16px;
+    grid-template-columns: repeat(12, 1fr);
+  }
+  .card{
+    background:var(--card); border:1px solid var(--border);
+    border-radius:var(--radius); box-shadow:var(--shadow);
+    padding:16px;
+  }
+  .card h2{
+    margin:0 0 8px; font-size:16px; color:var(--primary);
+  }
+  .kpis{ display:grid; grid-template-columns: repeat(5,1fr); gap:12px; }
+  .kpi{
+    background:#f9fbff; border:1px solid #e4edff; border-radius:12px; padding:12px;
+  }
+  .kpi span{ display:block; font-size:12px; color:var(--muted); }
+  .kpi strong{ font-size:18px; }
+  .rec{
+    display:flex; align-items:center; gap:10px; padding:12px;
+    background:#fffdf5; border:1px solid #ffe9b8; border-radius:12px;
+  }
+  .rec .badge{
+    display:inline-block; padding:4px 10px; border-radius:999px;
+    background:#ffe39a; color:#7a4d00; font-weight:700; font-size:12px;
+    margin-left:6px;
+  }
+  .muted{ color:var(--muted); font-size:13px; }
+
+  .col-6{ grid-column: span 6; }
+  .col-12{ grid-column: span 12; }
+  canvas{ width:100%!important; height:320px!important; }
+
+  table{
+    width:100%; border-collapse:collapse; font-size:14px;
+  }
+  th, td{ padding:10px; border-top:1px solid var(--border); text-align:left; }
+  thead th{ background:var(--primary); color:#fff; border-top:none; }
+
+  .tag-outlier{
+    display:inline-block; margin-left:6px; padding:2px 6px; font-size:12px;
+    font-weight:700; color:#7a0d0d; background:#ffe3e3; border:1px solid #f3b8b8; border-radius:999px;
+    vertical-align:middle;
+  }
+  .tag-curve{
+    margin-left:6px; padding:2px 6px; font-size:12px; border-radius:999px;
+    background:#eef2ff; color:#172554; border:1px solid #c7d2fe;
+  }
+  .back{
+    margin-top:16px; display:inline-block; padding:10px 14px; border-radius:8px;
+    background:#d32f2f; color:#fff; text-decoration:none; font-weight:700;
+  }
+  @media (max-width: 900px){
+    .kpis{ grid-template-columns: repeat(2,1fr); }
+    .col-6{ grid-column: span 12; }
+  }
+</style>
+</head>
+<body>
+<header class="wrap">
+  <h1>Análise de Mercado</h1>
+  <div class="muted">Dados carregados da aba “Cotação Rápida”, do armazenamento local, ou reconsultados no backend.</div>
+</header>
+
+<main class="wrap grid" id="analysis-root">
+  <!-- Recomendação + KPIs -->
+  <section class="card col-12" id="rec-kpis">
+    <div id="rec" class="rec" style="display:none;"></div>
+    <div class="kpis" id="kpis"></div>
+  </section>
+
+  <!-- Gráficos -->
+  <section class="card col-6">
+    <h2>Distribuição por Curva</h2>
+    <canvas id="chartCurvas"></canvas>
+  </section>
+
+  <section class="card col-6">
+    <h2>Média por Curva (R$)</h2>
+    <canvas id="chartMedias"></canvas>
+  </section>
+
+  <!-- Tabelas -->
+  <section class="card col-12">
+    <h2>Outliers sinalizados</h2>
+    <div class="muted">Valores fora do padrão pelos critérios IQR/P5-P95.</div>
+    <div class="table-wrap">
+      <table id="tblOutliers">
+        <thead>
+          <tr>
+            <th>ID Compra</th>
+            <th>Descrição</th>
+            <th>Preço Unitário</th>
+            <th>Fornecedor</th>
+            <th>UASG</th>
+            <th>UF</th>
+            <th>Curva</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card col-12">
+    <h2>Top 10 valores</h2>
+    <div class="table-wrap">
+      <table id="tblTop">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>ID Compra</th>
+            <th>Descrição</th>
+            <th>Preço Unitário</th>
+            <th>Fornecedor</th>
+            <th>UASG</th>
+            <th>UF</th>
+            <th>Curva</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="col-12">
+    <a class="back" href="cotacao-rapida.html">← Voltar à Cotação Rápida</a>
+  </section>
+</main>
+
+<script>
+(function(){
+  // === CONFIG ===
+  const BACKEND_URL = 'https://script.google.com/macros/s/AKfycbxGKxAHwAoy2w5WTd4viQ0SE-JF4amzsW3IPrKg2Zgox6cSv7i-rLmApD2OQ65rogND/exec';
+
+  /* ===================== HELPERS (function declarations = hoist) ===================== */
+  function fmtBRL(n){
+    return (typeof n === 'number' && isFinite(n))
+      ? n.toLocaleString('pt-BR',{style:'currency',currency:'BRL'})
+      : 'N/D';
+  }
+  function mean(a){ return a && a.length ? a.reduce((s,v)=>s+v,0)/a.length : 0; }
+  function median(a){
+    if(!a || !a.length) return 0;
+    const s = [...a].sort((x,y)=>x-y);
+    const m = Math.floor(s.length/2);
+    return s.length%2 ? s[m] : (s[m-1]+s[m])/2;
+  }
+  function std(a){
+    if(!a || !a.length) return 0;
+    const m = mean(a);
+    const v = mean(a.map(x=>(x-m)*(x-m)));
+    return Math.sqrt(v);
+  }
+  function calcStats(items){
+    const vals = (items||[]).map(x=>Number(x.precoUnitario)).filter(Number.isFinite);
+    const m = mean(vals), med = median(vals), s = std(vals);
+    const cv = m ? (s/m*100) : 0;
+    const outliers = (items||[]).filter(x=>x && x.isOutlier).length;
+    return { n: vals.length, mean:m, median:med, std:s, cv, outliersCount: outliers };
+  }
+  function readJSON(s){ if(!s) return null; try { return JSON.parse(s); } catch(_){ return null; } }
+  function findAnyStoredKey(type, code){
+    try {
+      for (let i=0; i<localStorage.length; i++){
+        const k = localStorage.key(i);
+        if (!k || !k.startsWith('ze-precos:last:')) continue;
+        if (type && !k.includes(`:${type}:`)) continue;
+        if (code && !k.endsWith(`:${code}`)) continue;
+        return k;
+      }
+    } catch(_) {}
+    return null;
+  }
+  function escapeHTML(str){
+    if (str === null || str === undefined) return '';
+    return String(str)
+      .replace(/&/g,'&amp;')
+      .replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;')
+      .replace(/'/g,'&#039;');
+  }
+  function safeURL(url) {
+    try {
+      const u = new URL(url, location.origin);
+      return (u.protocol === 'http:' || u.protocol === 'https:') ? u.href : '#';
+    } catch (_) { return '#'; }
+  }
+
+  /* ===================== RENDERERS ===================== */
+  function renderRecommendation(rec){
+    if(!rec || !rec.curve) return;
+    const el = document.getElementById('rec');
+    el.style.display = 'flex';
+    const cvTxt = (rec.stats && rec.stats.cv!=null) ? `${Number(rec.stats.cv).toFixed(1)}%` : 'N/D';
+    const nTxt  = (rec.stats && rec.stats.n!=null)  ? rec.stats.n : 'N/D';
+    el.innerHTML = `
+      <div><strong>Curva recomendada:</strong> Curva <b>${escapeHTML(rec.curve)}</b>
+        <span class="badge">Recomendada</span>
+        <div class="muted">
+          Critérios: CV ≤ 25% e ≥ 3 contratações • Métricas: CV ${cvTxt}, n=${nTxt}
+          ${rec.reason ? ` • Motivo: ${escapeHTML(rec.reason)}` : ''}
+        </div>
+      </div>
+    `;
+  }
+
+  function renderKPIs(s, curves){
+    const kpis = document.getElementById('kpis');
+    const counts = curves && curves.counts ? curves.counts : {};
+    kpis.innerHTML = `
+      <div class="kpi"><span>Média</span><strong>${fmtBRL(s.mean)}</strong></div>
+      <div class="kpi"><span>Mediana</span><strong>${fmtBRL(s.median)}</strong></div>
+      <div class="kpi"><span>CV</span><strong>${(s.cv!=null)? s.cv.toFixed(1)+'%':'N/D'}</strong></div>
+      <div class="kpi"><span>Registros</span><strong>${s.n ?? 'N/D'}</strong></div>
+      <div class="kpi"><span>Outliers</span><strong>${s.outliersCount ?? 0}</strong></div>
+      <div class="kpi"><span>Curva A</span><strong>${counts.A ?? 0}</strong></div>
+      <div class="kpi"><span>Curva B</span><strong>${counts.B ?? 0}</strong></div>
+      <div class="kpi"><span>Curva C</span><strong>${counts.C ?? 0}</strong></div>
+    `;
+  }
+
+  function renderPieCurvas(groups){
+    const ctx = document.getElementById('chartCurvas');
+    const a = groups.A.length, b = groups.B.length, c = groups.C.length, nd = groups.ND.length;
+    new Chart(ctx, {
+      type: 'pie',
+      data: { labels: ['A','B','C','N/D'], datasets: [{ data: [a,b,c,nd] }] },
+      options: {
+        plugins: {
+          legend: { position: 'bottom' },
+          tooltip: { callbacks:{ label: (ctx)=> `${ctx.label}: ${ctx.raw}` } }
+        }
+      }
+    });
+  }
+
+  function renderBarMedias(groups){
+    function avg(k){
+      const vals = groups[k].map(x=>Number(x.precoUnitario)).filter(Number.isFinite);
+      return vals.length ? mean(vals) : 0;
+    }
+    const ctx = document.getElementById('chartMedias');
+    new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: ['Curva A','Curva B','Curva C'],
+        datasets: [{ label: 'Média (R$)', data: [avg('A'), avg('B'), avg('C')] }]
+      },
+      options: {
+        scales: {
+          y: { ticks: { callback:(v)=> v.toLocaleString('pt-BR',{style:'currency',currency:'BRL'}) } }
+        },
+        plugins: {
+          legend: { display:false },
+          tooltip: { callbacks:{ label:(ctx)=> ' ' + fmtBRL(ctx.raw) } }
+        }
+      }
+    });
+  }
+
+  function fillOutliers(arr){
+    const tbody = document.querySelector('#tblOutliers tbody');
+    if(!arr.length){
+      tbody.innerHTML = `<tr><td colspan="7">Nenhum outlier encontrado.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = arr.map(x=>{
+      const link = (x.linkCompra && safeURL(x.linkCompra) !== '#')
+        ? `<a href="${safeURL(x.linkCompra)}" target="_blank" rel="noopener">${escapeHTML(x.idCompra || '')}</a>`
+        : escapeHTML(x.idCompra || 'N/A');
+      return `
+        <tr>
+          <td>${link}</td>
+          <td>${escapeHTML(x.descricaoItem || 'N/A')} <span class="tag-outlier">Outlier</span></td>
+          <td>${fmtBRL(Number(x.precoUnitario))}</td>
+          <td>${escapeHTML(x.nomeFornecedor || 'N/A')}</td>
+          <td>${escapeHTML(x.codigoUasg || '')} - ${escapeHTML(x.nomeUasg || '')}</td>
+          <td>${escapeHTML(x.estado || 'N/A')}</td>
+          <td><span class="tag-curve">${escapeHTML(x.curva || 'N/D')}</span></td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  function fillTop(all){
+    const tbody = document.querySelector('#tblTop tbody');
+    const sorted = [...all].sort((a,b)=>(Number(b.precoUnitario)||0)-(Number(a.precoUnitario)||0)).slice(0,10);
+    if(!sorted.length){
+      tbody.innerHTML = `<tr><td colspan="8">Sem dados.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = sorted.map((x,i)=>{
+      const link = (x.linkCompra && safeURL(x.linkCompra))
+  ? `<a href="${safeURL(x.linkCompra)}" target="_blank" rel="noopener">${escapeHTML(x.idCompra || '')}</a>`
+  : escapeHTML(x.idCompra || 'N/A');
+
+      return `
+        <tr>
+          <td>${i+1}</td>
+          <td>${link}</td>
+          <td>${escapeHTML(x.descricaoItem || 'N/A')}</td>
+          <td>${fmtBRL(Number(x.precoUnitario))}</td>
+          <td>${escapeHTML(x.nomeFornecedor || 'N/A')}</td>
+          <td>${escapeHTML(x.codigoUasg || '')}</td>
+          <td>${escapeHTML(x.estado || 'N/A')}</td>
+          <td><span class="tag-curve">${escapeHTML(x.curva || 'N/D')}</span></td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  function renderAll(data){
+    const precos = Array.isArray(data.precos) ? data.precos : [];
+
+    const groups = { A:[], B:[], C:[], ND:[] };
+    precos.forEach(p=>{
+      const c = (p && typeof p.curva === 'string' && ['A','B','C'].includes(p.curva)) ? p.curva : 'ND';
+      groups[c].push(p);
+    });
+
+    const stats  = data.stats || calcStats(precos);
+    const counts = data.curves?.counts || { A: groups.A.length, B: groups.B.length, C: groups.C.length };
+    const curves = { counts };
+
+    renderRecommendation(data.recommended);
+    renderKPIs(stats, curves);
+    renderPieCurvas(groups);
+    renderBarMedias(groups);
+    fillOutliers(precos.filter(x=>x && x.isOutlier));
+    fillTop(precos);
+  }
+
+  /* ===================== BOOTSTRAP (chamado por último) ===================== */
+  (async function bootstrap(){
+    const root = document.getElementById('analysis-root');
+    const usp  = new URLSearchParams(location.search);
+    const type = usp.get('type');
+    const code = usp.get('code');
+    const storeKey = usp.get('storeKey');
+
+    // 1) mesma aba
+    let payload = readJSON(sessionStorage.getItem('ze-precos:last'));
+
+    // 2) outra aba (storeKey explícita)
+    if (!payload && storeKey) payload = readJSON(localStorage.getItem(storeKey));
+
+    // 2b) deduz pela combinação type+code
+    if (!payload && type && code) {
+      const guess = `ze-precos:last:${type}:${code}`;
+      payload = readJSON(localStorage.getItem(guess));
+    }
+
+    // 2c) varre localStorage (último recurso local)
+    if (!payload && (type || code)) {
+      const found = findAnyStoredKey(type, code);
+      if (found) payload = readJSON(localStorage.getItem(found));
+    }
+
+    // 3) legado
+    if (!payload) {
+      const legacy = readJSON(sessionStorage.getItem('zePrecos:lastData'));
+      if (legacy) payload = { ts: Date.now(), type: type||null, code: code||null, data: legacy };
+    }
+
+    // 4) backend
+    if (!payload && type && code) {
+      try {
+        const formData = new URLSearchParams();
+        if (type === 'catmat') formData.append('catmat_code', code);
+        else formData.append('catser_code', code);
+
+        const resp = await fetch(BACKEND_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+          body: formData
+        });
+        if (resp.ok) payload = { ts: Date.now(), type, code, data: await resp.json() };
+      } catch (e) {
+        console.error('Erro ao refazer consulta na análise:', e);
+      }
+    }
+
+    if (!payload || !payload.data || !payload.data.success || !Array.isArray(payload.data.precos)) {
+      root.insertAdjacentHTML('afterbegin','<p style="padding:16px">Sem dados. Volte e faça uma cotação.</p>');
+      return;
+    }
+
+    renderAll(payload.data);
+  })();
+
+})();
+</script>
+</body>
+</html>
+
