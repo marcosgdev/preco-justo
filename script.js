@@ -1,30 +1,222 @@
+/* ============ HELPERS GLOBAIS (essenciais) ============ */
+function escapeHTML(str){
+  if (str === null || str === undefined) return '';
+  const map = { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#039;' };
+  return String(str).replace(/[&<>"']/g, ch => map[ch]);
+}
+function formatCNPJ(cnpj){
+  const v = (cnpj || '').replace(/\D+/g,'').padStart(14,'0').slice(-14);
+  if (v.length !== 14) return cnpj || '';
+  return v.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+}
+function normalizeCNPJ(cnpj){
+  // mantém zeros à esquerda; aceita entrada curta; remove máscara
+  const v = String(cnpj || '').replace(/\D+/g, '');
+  return v.padStart(14, '0').slice(-14);
+}
+function safeURL(url) {
+  try {
+    const u = new URL(url, location.origin);
+    if (!/^https?:$/.test(u.protocol)) return null;
+    const host = u.hostname.toLowerCase();
+    if (host === '127.0.0.1' || host === 'localhost') return null;
+    return u.href;
+  } catch (_) { return null; }
+}
+function fmtBRL(n){
+  if (typeof n !== 'number' || !isFinite(n)) return 'N/D';
+  return n.toLocaleString('pt-BR', { style:'currency', currency:'BRL' });
+}
+
+/* ===== Datas: parser robusto + formatação BR ===== */
+function parseToDate(x){
+  if (!x && x !== 0) return null;
+  if (x instanceof Date) return isNaN(+x) ? null : x;
+
+  // timestamp numérico
+  if (typeof x === 'number') {
+    const d = new Date(x);
+    return isNaN(+d) ? null : d;
+  }
+
+  const s = String(x).trim();
+  if (!s) return null;
+
+  // dd/mm/aaaa
+  const m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (m) return new Date(+m[3], +m[2]-1, +m[1]);
+
+  // yyyymmdd
+  const m2 = s.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (m2) return new Date(+m2[1], +m2[2]-1, +m2[3]);
+
+  // ISO ou formato reconhecível pelo Date
+  const d = new Date(s);
+  return isNaN(+d) ? null : d;
+}
+function fmtDateBR(value){
+  const d = parseToDate(value);
+  return d ? d.toLocaleDateString('pt-BR') : '—';
+}
+
+function scoreExplainerHTML(){
+  return `
+    <details class="score-note">
+      <summary>Como calculamos o <b>Score</b>?</summary>
+      <div class="note-body">
+        <p>O <b>score</b> (0 a 1) é uma heurística para ordenar fornecedores e combina três fatores:</p>
+        <ul>
+          <li><b>50% • Evidência (wN):</b> <code>wN = min(amostras, 10) / 10</code></li>
+          <li><b>30% • Estabilidade (wCV):</b> <code>wCV = 1 − min(CV, 0.5) / 0.5</code> &nbsp;
+              <small>(onde <code>CV = desvio&nbsp;padrão / média</code>)</small></li>
+          <li><b>20% • Abrangência (wUF):</b> <code>wUF = min(qtd_UFs, 5) / 5</code></li>
+        </ul>
+        <p><b>Fórmula final:</b> <code>score = 0.5·wN + 0.3·wCV + 0.2·wUF</code></p>
+        <p><b>Exemplo:</b> amostras = 7 → <code>wN = 0,7</code>; CV = 0,12 → <code>wCV ≈ 0,76</code>;
+           UFs = 3 → <code>wUF = 0,6</code> ⇒ <code>score ≈ 0,698</code>.</p>
+        <p class="muted"><em>Obs.:</em> é um indicador heurístico para ordenar candidatos — não substitui análise jurídica/compliance.</p>
+      </div>
+    </details>
+  `;
+}
+
+/* ====== SANÇÕES: índice unificado por CNPJ (aceita mapa ou lista) ====== */
+function buildSanctionsIndex(payload){
+  const byCnpj = Object.create(null);
+  const ensure = (key) => (byCnpj[key] || (byCnpj[key] = { resumo:null, registros:[] }));
+
+  // Mapas por CNPJ
+  const mapCands = [
+    payload && payload.sancoesByCnpj,
+    payload && payload.penaltiesByCnpj,
+    payload && payload.sanctionsByCnpj
+  ].filter(Boolean);
+
+  for (const m of mapCands){
+    for (const [cnpjRaw, val] of Object.entries(m)){
+      const key = normalizeCNPJ(cnpjRaw);
+      if (!key) continue;
+      const key8  = key.slice(0,8);
+      const slot14 = ensure(key);
+      const slot8  = ensure(key8);
+      if (val && typeof val === 'object') {
+        if (val.resumo || val.summary) { slot14.resumo = slot8.resumo = (val.resumo || val.summary); }
+        if (Array.isArray(val.registros)) { slot14.registros.push(...val.registros); slot8.registros.push(...val.registros); }
+        if (Array.isArray(val.records))   { slot14.registros.push(...val.records);   slot8.registros.push(...val.records); }
+        if (Array.isArray(val))           { slot14.registros.push(...val);           slot8.registros.push(...val); }
+      }
+    }
+  }
+
+  // Listas soltas de sanções
+  const listCands = [
+    payload && payload.sancoes,
+    payload && payload.penalties,
+    payload && payload.sanctions
+  ].filter(Boolean);
+
+  for (const list of listCands){
+    for (const item of (Array.isArray(list) ? list : [])){
+      const key = normalizeCNPJ(item?.cnpj || item?.CNPJ || item?.cnpjRoot);
+      if (!key) continue;
+      const key8  = key.slice(0,8);
+      const slot14 = ensure(key);
+      const slot8  = ensure(key8);
+      if (item.resumo || item.summary) { slot14.resumo = slot8.resumo = (item.resumo || item.summary); }
+      slot14.registros.push(item);
+      slot8.registros.push(item);
+    }
+  }
+  return byCnpj;
+}
+
+function isRegistroAtivo(reg){
+  if (reg?.ativo === true || reg?.active === true || reg?.status === 'ATIVA' || reg?.status === 'ACTIVE') return true;
+  if (reg?.ativo === false || reg?.active === false || reg?.status === 'ENCERRADA' || reg?.status === 'ENDED' || reg?.status === 'INATIVA') return false;
+  const now = new Date();
+  const fim = reg?.dataFim || reg?.data_fim || reg?.endDate || reg?.validUntil || reg?.dtFim;
+  if (fim){
+    const df = new Date(fim);
+    if (!Number.isNaN(+df)) return df >= now;
+  }
+  return !fim;
+}
+
+/* ===== Badge de status de sanções (mantido para compatibilidade, não usado na tabela) ===== */
+function renderPenStatus(sancoesOrCnpj, sancIndex){
+  let sancoes = null;
+  if (typeof sancoesOrCnpj === 'string') {
+    const k14 = normalizeCNPJ(sancoesOrCnpj);
+    const k8  = k14.slice(0,8);
+    sancoes = (sancIndex && (sancIndex[k14] || sancIndex[k8])) || null;
+  } else {
+    sancoes = sancoesOrCnpj || null;
+  }
+  if (sancoes && sancoes.resumo && typeof sancoes.resumo.temVigente === 'boolean') {
+    const r = sancoes.resumo;
+    if (r.temVigente) {
+      const cats = (r.categoriasVigentes || []).join(', ');
+      return `
+        <span class="pen-badge pen-on">Penalidade vigente</span>
+        <small class="pen-note">(${r.qtdeVigentes || 0} registro(s)${cats ? ' • ' + escapeHTML(cats) : ''})</small>
+      `;
+    }
+    return `<span class="pen-badge pen-off">Sem penalidades vigentes</span>`;
+  }
+  const regs = Array.isArray(sancoes?.registros) ? sancoes.registros : [];
+  if (regs.length) {
+    const ativos = regs.filter(isRegistroAtivo);
+    if (ativos.length > 0) {
+      const cats = new Set();
+      for (const r of ativos) {
+        const cat = r?.descricaoResumida || r?.descricaoTipoSancao || r?.tipoSancao ||
+                    r?.descricaoPortal || r?.penalidade || r?.descricao || r?.descricaoDetalhada || r?.categoria || '';
+        if (cat) cats.add(String(cat));
+      }
+      return `
+        <span class="pen-badge pen-on">Penalidade vigente</span>
+        <small class="pen-note">(${ativos.length} registro(s)${cats.size ? ' • ' + escapeHTML([...cats].join(', ')) : ''})</small>
+      `;
+    }
+    return `<span class="pen-badge pen-off">Sem penalidades vigentes</span>`;
+  }
+  return `<span class="pen-badge pen-unknown">Sem informações</span>`;
+}
+
+
+/* =================== APP =================== */
 document.addEventListener('DOMContentLoaded', () => {
   const form = document.querySelector('.price-form');
   const resultsContainer = document.getElementById('results-container');
-
-  if (!form || !resultsContainer) {
-    console.error('Form (.price-form) ou #results-container não encontrados.');
-    return;
-  }
+  if (!form || !resultsContainer) return;
 
   const loadingMessage = document.createElement('div');
   loadingMessage.classList.add('loading-message', 'hidden');
   loadingMessage.textContent = 'Aguarde, sua pesquisa está sendo processada...';
   form.parentNode.insertBefore(loadingMessage, form.nextSibling);
 
-  // URL da sua página de Análise de Mercado
   const ANALYSIS_URL = 'analise-mercado.html';
+const ACOMP_BASE_URL = 'https://cnetmobile.estaleiro.serpro.gov.br/comprasnet-web/public/compras/acompanhamento-compra'; 
 
-  // Endpoint do GAS
-  const BACKEND_URL = 'https://script.google.com/macros/s/AKfycbxGKxAHwAoy2w5WTd4viQ0SE-JF4amzsW3IPrKg2Zgox6cSv7i-rLmApD2OQ65rogND/exec';
+function compraUrl(id) {
+  const clean = String(id || '').replace(/[^\d]/g, '');
+  if (!clean) return safeURL(ACOMP_BASE_URL);
+  const deep = `${ACOMP_BASE_URL}?compra=${encodeURIComponent(clean)}`;
+  // tenta o deep link; se por algum motivo não for aceito, volta p/ base
+  return safeURL(deep) || safeURL(ACOMP_BASE_URL);
+}
 
-  // Controle para cancelar requisições em voo
+
+  // Seus deploys GAS
+  const BACKEND_PRICES_URL    = 'https://script.google.com/macros/s/AKfycbxGKxAHwAoy2w5WTd4viQ0SE-JF4amzsW3IPrKg2Zgox6cSv7i-rLmApD2OQ65rogND/exec';
+  const BACKEND_SUPPLIERS_URL = 'https://script.google.com/macros/s/AKfycbytIZagCuuzHmxOV3GSmFnPvcl8jtnMIR3BeMCFIjILmX-qLZVvotiNnlw1Kbpdqh0k/exec';
+
+  const MAX_PAGINAS_PADRAO = 2;
   let inflightCtrl = null;
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
 
-    // Cancela chamada anterior (se houver)
     if (inflightCtrl) inflightCtrl.abort();
     inflightCtrl = new AbortController();
 
@@ -32,14 +224,12 @@ document.addEventListener('DOMContentLoaded', () => {
     clearErrors();
     resultsContainer.innerHTML = '';
 
-    // limpa estados
     window.__lastSummary  = '';
     window.__curveMeta    = null;
     window.__lastData     = null;
     window.__curveStats   = null;
     window.__recommended  = null;
 
-    // remove botões anteriores (análise + export)
     removeGoToAnalysisButton();
 
     const btnSubmit = form.querySelector('[type="submit"]');
@@ -58,59 +248,68 @@ document.addEventListener('DOMContentLoaded', () => {
       showError('Preencha pelo menos um dos campos (CATMAT ou CATSER).', document.getElementById('catmat_code')?.parentNode);
       isValid = false;
     }
-    if (!isValid) {
-      if (btnSubmit) btnSubmit.disabled = false;
-      return;
-    }
+    if (!isValid) { if (btnSubmit) btnSubmit.disabled = false; return; }
 
-    const formData = new URLSearchParams();
     const type = catmatCode ? 'catmat' : 'catser';
     const code = catmatCode || catserCode;
 
+    const formData = new URLSearchParams();
     if (type === 'catmat') formData.append('catmat_code', code);
     else formData.append('catser_code', code);
 
     loadingMessage.classList.remove('hidden');
 
     try {
-      const response = await fetch(BACKEND_URL, {
+      // 1) preços
+      const response = await fetch(BACKEND_PRICES_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
         body: formData,
         signal: inflightCtrl.signal
       });
-
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
 
-      // Guarda tudo para exportação e render
       window.__lastData    = data;
       window.__lastSummary = data.summary || '';
       window.__curveMeta   = data.curves || null;
       window.__curveStats  = data.curveStats || null;
       window.__recommended = data.recommended || null;
 
-      // sucesso somente com pelo menos um registro (tabela visível)
       if (data.success && Array.isArray(data.precos) && data.precos.length > 0) {
         displayResults(data.precos);
 
-        // salva contexto da última pesquisa em sessionStorage e localStorage (compartilha entre abas)
         const payload = { ts: Date.now(), type, code, data };
         const storeKey = `ze-precos:last:${type}:${code}`;
         sessionStorage.setItem('ze-precos:last', JSON.stringify(payload));
         try { localStorage.setItem(storeKey, JSON.stringify(payload)); } catch (_) {}
 
-        // Atualiza card de análise (mesma página), se existir
         renderMarketAnalysisCard(data);
-
-        // Cria os botões (Exportar XLSX + Ir para Análise) ao final da tabela
         renderActionsRow({ type, code, storeKey });
+
+        // 2) fornecedores (com possível fallback JSONP)
+        showSuppliersLoading();
+        try {
+          const filtros = Object.assign({}, coletarFiltrosUI(), { maxPaginas: MAX_PAGINAS_PADRAO });
+          const { lista: fornecedores, sancIndex } = await buscarFornecedores({ type, code, filtros });
+
+          // DIAGNÓSTICO
+          console.log('[fornecedores] total:', fornecedores?.length || 0);
+          console.log('[sanctionsIndex] chaves (amostra):', Object.keys(sancIndex || {}).slice(0,10));
+
+          renderListaFornecedores(fornecedores, ensureSuppliersSection(), sancIndex);
+        } catch (e2) {
+          renderSuppliersError('Não foi possível listar fornecedores potenciais agora. Tente novamente mais tarde.');
+          console.error(e2);
+        } finally {
+          hideSuppliersLoading();
+        }
       } else {
         showError(data.message || 'Sem resultados.');
       }
-    } catch (error) {
-      if (error.name !== 'AbortError') {
-        console.error('Erro ao enviar o formulário:', error);
+    } catch (err) {
+      if (err.name !== 'AbortError') {
+        console.error('Erro ao enviar o formulário:', err);
         showError('Ocorreu um erro ao conectar com o servidor. Tente novamente mais tarde.');
       }
     } finally {
@@ -120,7 +319,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // ---------- Render tabela ----------
+  /* ---------- tabela (preços) ---------- */
   function displayResults(precos) {
     if (!precos || precos.length === 0) {
       resultsContainer.innerHTML = '<p>Nenhum resultado encontrado.</p>';
@@ -139,15 +338,13 @@ document.addEventListener('DOMContentLoaded', () => {
       html += `
         <div class="results-summary" aria-live="polite">
           <strong>Resumo:</strong> ${escapeHTML(window.__lastSummary)}
-        </div>
-      `;
+        </div>`;
     }
 
     if (window.__recommended && window.__recommended.curve) {
       const rec = window.__recommended;
       const cvTxt = (rec.stats?.cv != null) ? `${Number(rec.stats.cv).toFixed(1)}%` : 'N/D';
       const nTxt  = (rec.stats?.n  != null) ? rec.stats.n : 'N/D';
-
       html += `
         <div class="recommendation-card">
           <div class="recommendation-icon">★</div>
@@ -161,8 +358,7 @@ document.addEventListener('DOMContentLoaded', () => {
               ${rec.reason ? `<span class="dot">•</span><span><b>Motivo:</b> ${escapeHTML(rec.reason)}</span>` : ''}
             </div>
           </div>
-        </div>
-      `;
+        </div>`;
     }
 
     const meta = window.__curveMeta;
@@ -174,8 +370,7 @@ document.addEventListener('DOMContentLoaded', () => {
           <span><strong>Curva A</strong>: ≤ ${t1}</span>
           <span><strong>Curva B</strong>: entre ${t1} e ${t2}</span>
           <span><strong>Curva C</strong>: > ${t2}</span>
-        </div>
-      `;
+        </div>`;
     }
 
     ['A','B','C','N/D'].forEach(curva => {
@@ -201,49 +396,47 @@ document.addEventListener('DOMContentLoaded', () => {
               <th>Estado</th>
             </tr>
           </thead>
-          <tbody>
-      `;
+          <tbody>`;
 
       arr.forEach(item => {
         const precoUnitario = (typeof item.precoUnitario === 'number')
           ? item.precoUnitario.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
           : (item.precoUnitario || 'N/A');
-
-        const dataCompra = item.dataCompra
-          ? new Date(item.dataCompra).toLocaleDateString('pt-BR')
-          : 'N/A';
-
+        const dataCompra = item.dataCompra ? new Date(item.dataCompra).toLocaleDateString('pt-BR') : 'N/A';
         const isOut = !!item.isOutlier;
         const trClass = isOut ? ' class="outlier-row"' : '';
         const titleRow = isOut ? ' title="Valor fora do padrão (outlier)"' : '';
+const idCompraVal = (item.idCompra ?? '').toString().trim();
+const href = item.linkCompra ? safeURL(item.linkCompra) : null;
 
-        const href = item.linkCompra ? safeURL(item.linkCompra) : null;
-        const idContent = item.idCompra
-          ? (href
-              ? `<a href="${href}" target="_blank" rel="noopener noreferrer">${escapeHTML(item.idCompra.toString())}</a>`
-              : `${escapeHTML(item.idCompra.toString())}`)
-          : 'N/A';
+const idContent = idCompraVal
+  ? (href
+      ? `<a href="${href}" target="_blank" rel="noopener noreferrer">${escapeHTML(idCompraVal)}</a>`
+      : `${escapeHTML(idCompraVal)}`)
+  : 'N/A';
 
-        html += `<tr${trClass}${titleRow}>`;
-        html += `<td>${idContent}<span class="tag-curve">${escapeHTML(item.curva || 'N/D')}</span></td>`;
-        html += `<td>${escapeHTML(item.descricaoItem || 'N/A')}${isOut ? ' <span class="tag-outlier">🚩 Outlier</span>' : ''}</td>`;
-        html += `<td>${precoUnitario}</td>`;
-        html += `<td>${(item.quantidade ?? 'N/A')}</td>`;
-        html += `<td>${dataCompra}</td>`;
-        html += `<td>${escapeHTML(item.nomeFornecedor || 'N/A')}</td>`;
-        html += `<td>${escapeHTML(item.codigoUasg || 'N/A')}</td>`;
-        html += `<td>${escapeHTML(item.nomeUasg || 'N/A')}</td>`;
-        html += `<td>${escapeHTML(item.estado || 'N/A')}</td>`;
-        html += `</tr>`;
+        html += `<tr${trClass}${titleRow}>
+  <td>${idContent}<span class="tag-curve">${escapeHTML(item.curva || 'N/D')}</span></td>
+  <td>${escapeHTML(item.descricaoItem || 'N/A')}${isOut ? ' <span class="tag-outlier">🚩 Outlier</span>' : ''}</td>
+  <td>${precoUnitario}</td>
+  <td>${(item.quantidade ?? 'N/A')}</td>
+  <td>${dataCompra}</td>
+  <td>${escapeHTML(item.nomeFornecedor || 'N/A')}</td>
+  <td>${escapeHTML(item.codigoUasg || 'N/A')}</td>
+  <td>${escapeHTML(item.nomeUasg || 'N/A')}</td>
+  <td>${escapeHTML(item.estado || 'N/A')}</td>
+</tr>`;
+
       });
 
       html += `</tbody></table>`;
     });
 
     resultsContainer.innerHTML = html;
+    ensureSuppliersSection();
   }
 
-  // ---------- Card "Análise de Mercado" (na mesma página, se existir) ----------
+  /* ---------- card de análise ---------- */
   function renderMarketAnalysisCard(data){
     const el = document.querySelector('#card-analise-mercado');
     if (!el) return;
@@ -280,32 +473,24 @@ document.addEventListener('DOMContentLoaded', () => {
           <strong>${(curves.counts?.A || 0)} / ${(curves.counts?.B || 0)} / ${(curves.counts?.C || 0)}</strong>
         </div>
         ${data.summary ? `<p class="analysis-summary">${escapeHTML(data.summary)}</p>` : ''}
-      </div>
-    `;
+      </div>`;
   }
 
-  // ---------- Botões (Exportar + Análise) ----------
+  /* ---------- ações ---------- */
   function renderActionsRow({ type, code, storeKey }){
-    removeGoToAnalysisButton(); // evita duplicar
+    removeGoToAnalysisButton();
 
     const wrap = document.createElement('div');
     wrap.className = 'actions-row';
 
-    // Botão Exportar XLSX (herda estilo do seu botão base; ajuste classe se quiser)
     const btnExport = document.createElement('button');
     btnExport.type = 'button';
     btnExport.className = 'submit-button btn-export-xlsx';
     btnExport.textContent = 'Exportar XLSX';
     btnExport.addEventListener('click', async () => {
-      try {
-        await ensureXlsxLoaded();
-        exportXlsx();
-      } catch (e) {
-        console.error(e);
-      }
+      try { await ensureXlsxLoaded(); exportXlsx(); } catch (e) { console.error(e); }
     });
 
-    // Botão Ir para Análise
     const q = new URLSearchParams({ type, code, storeKey: storeKey || '' });
     const btnAnalyze = document.createElement('a');
     btnAnalyze.className = 'submit-button btn-go-analysis';
@@ -314,13 +499,10 @@ document.addEventListener('DOMContentLoaded', () => {
     btnAnalyze.rel = 'noopener';
     btnAnalyze.textContent = 'Ir para Análise de Mercado';
 
-    // ordem: Exportar | Análise (ajuste se preferir)
     wrap.appendChild(btnExport);
     wrap.appendChild(btnAnalyze);
     resultsContainer.appendChild(wrap);
   }
-
-  // remove antigo container (compatível com versões anteriores)
   function removeGoToAnalysisButton(){
     const oldRow = document.querySelector('.actions-row');
     if (oldRow && oldRow.parentNode) oldRow.parentNode.removeChild(oldRow);
@@ -328,19 +510,222 @@ document.addEventListener('DOMContentLoaded', () => {
     if (old && old.parentNode) old.parentNode.removeChild(old);
   }
 
-  // ---------- Utilidades ----------
+  /* ---------- filtros opcionais ---------- */
+  function coletarFiltrosUI(){
+    const uf = document.getElementById('filtro_uf')?.value?.trim();
+    const codigoUasg = document.getElementById('filtro_uasg')?.value?.trim();
+    const codigoMunicipio = document.getElementById('filtro_municipio')?.value?.trim();
+    const filtros = {};
+    if (uf) filtros.uf = uf;
+    if (codigoUasg) filtros.codigoUasg = codigoUasg;
+    if (codigoMunicipio) filtros.codigoMunicipio = codigoMunicipio;
+    return filtros;
+  }
+
+  /* ---------- seção de fornecedores ---------- */
+  function ensureSuppliersSection(){
+    let sec = document.getElementById('bloco-fornecedores');
+    if (!sec) {
+      sec = document.createElement('section');
+      sec.id = 'bloco-fornecedores';
+      sec.className = 'suppliers-section';
+      sec.innerHTML = `
+        <h3 class="suppliers-title">Fornecedores Potenciais</h3>
+        <div id="suppliers-loading" class="suppliers-loading hidden">Carregando fornecedores…</div>
+        <div id="suppliers-error" class="suppliers-error"></div>
+        <div id="suppliers-table"></div>
+      `;
+      resultsContainer.insertAdjacentElement('afterend', sec);
+    }
+    return sec.querySelector('#suppliers-table');
+  }
+  function showSuppliersLoading(){
+    const el = document.getElementById('suppliers-loading');
+    if (el) el.classList.remove('hidden');
+    const er = document.getElementById('suppliers-error');
+    if (er) er.textContent = '';
+  }
+  function hideSuppliersLoading(){
+    const el = document.getElementById('suppliers-loading');
+    el && el.classList.add('hidden');
+  }
+  function renderSuppliersError(msg){
+    const er = document.getElementById('suppliers-error');
+    if (er) er.textContent = msg || 'Erro ao carregar fornecedores.';
+  }
+
+  /* ---------- fornecedores (POST + fallback JSONP) ---------- */
+  async function buscarFornecedores({ type, code, filtros = {} }) {
+    const body = new URLSearchParams({
+      action: 'fornecedoresPorCatalogo',
+      type, code,
+      includeSanctions: '1',
+      filtros: JSON.stringify(filtros || {})
+    });
+
+    const normalizeReturn = (data) => {
+      const lista = Array.isArray(data) ? data
+                 : Array.isArray(data?.lista) ? data.lista
+                 : (data?.suppliers || data?.items || []);
+      const sancIndex = buildSanctionsIndex(data || {}); // não usamos, mas mantido
+
+      // DIAGNÓSTICO
+      console.log('[diag] fornecedores:', Array.isArray(lista) ? lista.length : 0);
+      console.log('[diag] sancIndex keys:', Object.keys(sancIndex));
+
+      return { lista, sancIndex };
+    };
+
+    try {
+      const res = await fetch(BACKEND_SUPPLIERS_URL || BACKEND_PRICES_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+        body
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.error || 'Erro buscando fornecedores');
+      return normalizeReturn(json.data);
+    } catch (err) {
+      console.warn('POST falhou (possível CORS). Tentando JSONP…', err);
+      const data = await jsonpCall('fornecedoresPorCatalogo', { type, code, filtros, includeSanctions:'1' });
+      return normalizeReturn(data);
+    }
+  }
+
+  // JSONP util genérico (mantido apenas para fornecedores)
+  function jsonpCall(action, params) {
+    return new Promise((resolve, reject) => {
+      const cbName = `__jsonp_cb_${Date.now()}_${Math.floor(Math.random()*1e6)}`;
+      const base   = normalizeExecURL(BACKEND_SUPPLIERS_URL || BACKEND_PRICES_URL);
+      const search = new URLSearchParams({ action, callback: cbName, _: Date.now() });
+      if (params) {
+        Object.entries(params).forEach(([k,v]) => {
+          search.append(k, typeof v === 'object' ? JSON.stringify(v) : String(v));
+        });
+      }
+      const src = `${base}?${search.toString()}`;
+
+      const script = document.createElement('script');
+      const timeout = setTimeout(() => { cleanup(); reject(new Error('Timeout JSONP')); }, 25000);
+
+      function cleanup(){
+        clearTimeout(timeout);
+        try { delete window[cbName]; } catch(_) { window[cbName] = undefined; }
+        script.remove();
+      }
+      window[cbName] = (resp) => {
+        cleanup();
+        if (resp && resp.ok) resolve(resp.data);
+        else reject(new Error(resp?.error || 'Falha JSONP'));
+      };
+      script.onerror = () => { cleanup(); reject(new Error('Erro de rede JSONP')); };
+      script.src = src;
+      document.head.appendChild(script);
+    });
+  }
+  function normalizeExecURL(url) { return url.replace(/\?.*$/,'').replace(/\/exec\/?$/, '/exec'); }
+
+  /* ---------- Tabela de Fornecedores (agora com "Última venda") ---------- */
+  function renderListaFornecedores(lista, container, sancIndex) {
+    if (!container) return;
+    container.onclick = null;
+
+    if (!Array.isArray(lista) || lista.length === 0) {
+      container.innerHTML = `<p>Nenhum fornecedor potencial encontrado para este item.</p>`;
+      return;
+    }
+
+    const rows = lista.map((f) => {
+      const nome = (f && f.nome) ? f.nome : '—';
+      const cnpjFmt = formatCNPJ(f && f.cnpj) || '—';
+
+      const precoMedio = (typeof f.precoMedio === 'number')
+        ? f.precoMedio.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+        : '—';
+
+      const cvTxt  = (typeof f.cv === 'number') ? (f.cv * 100).toFixed(1) + '%' : '—';
+      const ufs    = (Array.isArray(f.ufs) && f.ufs.length) ? f.ufs.join(', ') : '—';
+      const marcas = (Array.isArray(f.marcas) && f.marcas.length) ? f.marcas.join(', ') : '—';
+      const score  = (typeof f.score === 'number') ? f.score.toFixed(3) : '—';
+
+      // Coleta robusta para o campo de última venda
+      const lastVendaRaw =
+        f.lastVenda ?? f.last_venda ?? f.ultimaVenda ?? f.ultima_venda ??
+        f.lastSaleDate ?? f.last_sale_date ?? f.lastDate ?? f.last_date ??
+        f.lastCompra ?? f.ultimaCompra ?? f.dataUltimaVenda ?? f.data_ultima_venda ?? null;
+
+      const lastVendaTxt = fmtDateBR(lastVendaRaw);
+
+      // UF e ID da compra (se vierem)
+      const lastUF = f.lastVendaUF ?? f.last_venda_uf ?? null;
+      const lastCompraId = f.lastVendaIdCompra ?? f.last_venda_id_compra ?? f.idUltimaCompra ?? null;
+
+     let ultimaHtml = fmtDateBR(lastVendaRaw);
+
+if (lastCompraId && ultimaHtml !== '—') {
+  const idStr = String(lastCompraId).trim();
+  const href  = compraUrl(idStr); // deep link ?compra=<id> (com fallback)
+
+  ultimaHtml = `
+    <div class="ultima-venda-cell">
+      <span>${ultimaHtml}</span>
+      <button type="button" class="btn-copy-id"
+              data-copy="${escapeHTML(idStr)}"
+              title="Copiar ID da compra">📋</button>
+      ${href ? `<a href="${href}" target="_blank" rel="noopener noreferrer"
+                  title="Abrir acompanhamento desta compra">Abrir</a>` : ''}
+    </div>
+  `;
+}
+
+      const tip = [];
+      if (lastUF) tip.push(`UF: ${lastUF}`);
+      if (lastCompraId) tip.push(`Compra: ${lastCompraId}`);
+      const tipAttr = tip.length ? ` title="${escapeHTML(tip.join(' • '))}"` : '';
+
+      return `
+        <tr>
+          <td>${escapeHTML(nome)}</td>
+          <td>${cnpjFmt}</td>
+          <td>${f.amostras ?? 0}</td>
+          <td>${precoMedio}</td>
+          <td>${cvTxt}</td>
+          <td>${ufs}</td>
+          <td>${marcas}</td>
+          <td><span${tipAttr}>${ultimaHtml}</span></td>
+          <td>${score}</td>
+        </tr>
+      `;
+    }).join('');
+
+    container.innerHTML = `
+      <table class="results-table suppliers-table">
+        <thead>
+          <tr>
+            <th>Fornecedor</th><th>CNPJ</th><th>Amostras</th><th>Preço médio</th>
+            <th>CV</th><th>UFs</th><th>Marcas</th><th>Última venda</th><th>Score</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    `;
+
+    // Nota explicativa do Score (opcional)
+    container.insertAdjacentHTML('beforeend', scoreExplainerHTML());
+  }
+
+  /* ---------- utilidades de UI ---------- */
   function clearMessages() {
     const messages = document.querySelectorAll('.success-message, .warning-message, .error-message-global');
     messages.forEach(msg => msg.remove());
   }
-
   function clearErrors() {
     const errorDivs = document.querySelectorAll('.form-group.error');
     errorDivs.forEach(div => div.classList.remove('error'));
     const errorMessages = document.querySelectorAll('.form-group .error-message');
     errorMessages.forEach(msg => msg.remove());
   }
-
   function showError(message, element) {
     if (element) {
       element.classList.add('error');
@@ -355,28 +740,6 @@ document.addEventListener('DOMContentLoaded', () => {
       form.parentNode.insertBefore(errorMsg, form.nextSibling);
     }
   }
-
-  function escapeHTML(str){
-    if (str === null || str === undefined) return '';
-    const map = { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#039;' };
-    return String(str).replace(/[&<>"']/g, ch => map[ch]);
-  }
-
-  function fmtBRL(n){
-    if (typeof n !== 'number' || !isFinite(n)) return 'N/D';
-    return n.toLocaleString('pt-BR', { style:'currency', currency:'BRL' });
-  }
-
-  function safeURL(url) {
-    try {
-      const u = new URL(url, location.origin);
-      if (!/^https?:$/.test(u.protocol)) return null;
-      const host = u.hostname.toLowerCase();
-      if (host === '127.0.0.1' || host === 'localhost') return null;
-      return u.href;
-    } catch (_) { return null; }
-  }
-
   function sanitizeHTML(html) {
     const t = document.createElement('template');
     t.innerHTML = html || '';
@@ -387,26 +750,39 @@ document.addEventListener('DOMContentLoaded', () => {
       });
       if (el.tagName === 'A' && el.hasAttribute('href')) {
         const h = safeURL(el.getAttribute('href'));
-        if (h) {
-          el.setAttribute('href', h);
-          el.setAttribute('rel','noopener noreferrer');
-          el.setAttribute('target','_blank');
-        } else {
-          el.removeAttribute('href');
-        }
-      }
-      if (el.tagName === 'IMG' && el.hasAttribute('src')) {
-        const src = el.getAttribute('src');
-        const ok = /^https?:/i.test(src) || src.startsWith('/') || src.startsWith('./');
-        if (!ok) el.removeAttribute('src');
-        el.setAttribute('loading','lazy');
-        el.setAttribute('decoding','async');
+        if (h) { el.setAttribute('href', h); el.setAttribute('rel','noopener noreferrer'); el.setAttribute('target','_blank'); }
+        else { el.removeAttribute('href'); }
       }
     });
     return t.innerHTML;
   }
 
-  // Carrega SheetJS caso não esteja presente
+// Handler global para botões "copiar ID"
+function installCopyHandler(root = document) {
+  root.addEventListener('click', (ev) => {
+    const btn = ev.target.closest('.btn-copy-id');
+    if (!btn) return;
+    const txt = btn.getAttribute('data-copy') || '';
+    if (!txt) return;
+
+    const ok = () =>
+      (btn.textContent = '✔', setTimeout(() => (btn.textContent = '📋'), 1200));
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(txt).then(ok).catch(() => {});
+    } else {
+      // fallback
+      const ta = document.createElement('textarea');
+      ta.value = txt; document.body.appendChild(ta);
+      ta.select(); document.execCommand('copy'); ta.remove();
+      ok();
+    }
+  });
+}
+installCopyHandler(document);
+
+
+  /* ---------- exportação XLSX ---------- */
   function ensureXlsxLoaded(){
     return new Promise((resolve, reject) => {
       if (typeof XLSX !== 'undefined') return resolve();
@@ -414,28 +790,16 @@ document.addEventListener('DOMContentLoaded', () => {
       const s = document.createElement('script');
       s.src = src;
       s.onload = () => resolve();
-      s.onerror = () => {
-        showError('Não foi possível carregar a biblioteca XLSX. Verifique sua conexão.');
-        reject(new Error('Falha ao carregar XLSX'));
-      };
+      s.onerror = () => { showError('Não foi possível carregar a biblioteca XLSX. Verifique sua conexão.'); reject(new Error('Falha ao carregar XLSX')); };
       document.head.appendChild(s);
     });
   }
-
-  /* ================== EXPORTAÇÃO XLSX ================== */
   function exportXlsx(){
     const d = window.__lastData;
-    if (!d || !Array.isArray(d.precos) || d.precos.length === 0) {
-      alert('Faça uma pesquisa primeiro para exportar os resultados.');
-      return;
-    }
-    if (typeof XLSX === 'undefined') {
-      alert('Biblioteca XLSX não encontrada.');
-      return;
-    }
+    if (!d || !Array.isArray(d.precos) || d.precos.length === 0) { alert('Faça uma pesquisa primeiro para exportar os resultados.'); return; }
+    if (typeof XLSX === 'undefined') { alert('Biblioteca XLSX não encontrada.'); return; }
 
     const wb = XLSX.utils.book_new();
-
     const stats = d.stats || {};
     const curves = d.curves || { counts: {} };
     const rec = d.recommended || null;
@@ -460,76 +824,36 @@ document.addEventListener('DOMContentLoaded', () => {
       const statsHeader = ['Curva','n','Média','Mediana','Desvio Padrão','CV%'];
       const cvFix = v => (typeof v === 'number' ? Number(v.toFixed(2)) : v);
       const statsRows = [
-        ['A', s.A?.n ?? 0, s.A?.mean ?? null, s.A?.median ?? null, s.A?.std ?? null, cvFix(s.A?.cv ?? null)],
-        ['B', s.B?.n ?? 0, s.B?.mean ?? null, s.B?.median ?? null, s.B?.std ?? null, cvFix(s.B?.cv ?? null)],
-        ['C', s.C?.n ?? 0, s.C?.mean ?? null, s.C?.median ?? null, s.C?.std ?? null, cvFix(s.C?.cv ?? null)],
+        ['A', s.A?.n ?? 0, s.A?.mean ?? null, s.A?.median ?? null, s.A?.std ?? null, cvFix(s.A?.cv ?? null) ],
+        ['B', s.B?.n ?? 0, s.B?.mean ?? null, s.B?.median ?? null, s.B?.std ?? null, cvFix(s.B?.cv ?? null) ],
+        ['C', s.C?.n ?? 0, s.C?.mean ?? null, s.C?.median ?? null, s.C?.std ?? null, cvFix(s.C?.cv ?? null) ],
       ];
       const wsCS = XLSX.utils.aoa_to_sheet([statsHeader, ...statsRows]);
       XLSX.utils.book_append_sheet(wb, wsCS, 'Curvas-Stats');
     }
 
-    // datas/números em tipos nativos
-    const excelDate = iso => {
-      if (!iso) return null;
-      const d = new Date(iso);
-      return isNaN(+d) ? null : d;
-    };
-
-    const header = [
-      'ID Compra','Descrição do Item','Preço Unitário','Quantidade','Data da Compra',
-      'Fornecedor','Código UASG','Nome da UASG','Estado','Outlier','Curva','Link Compra'
-    ];
-
-    const toRows = arr => arr.map(it => ([
-      it.idCompra || '',
-      it.descricaoItem || '',
+    const excelDate = iso => { if (!iso) return null; const d = new Date(iso); return isNaN(+d) ? null : d; };
+    const header = ['ID Compra','Descrição do Item','Preço Unitário','Quantidade','Data da Compra','Fornecedor','Código UASG','Nome da UASG','Estado','Outlier','Curva','Link Compra'];
+    const toRows = arr => arr.map(it => ([ 
+      it.idCompra || '', it.descricaoItem || '',
       (typeof it.precoUnitario === 'number' ? it.precoUnitario : null),
-      (it.quantidade ?? null),
-      excelDate(it.dataCompra),
-      it.nomeFornecedor || '',
-      it.codigoUasg || '',
-      it.nomeUasg || '',
-      it.estado || '',
-      it.isOutlier ? 'Sim' : 'Não',
-      it.curva || '',
-      safeURL(it.linkCompra) || ''
+      (it.quantidade ?? null), excelDate(it.dataCompra),
+      it.nomeFornecedor || '', it.codigoUasg || '', it.nomeUasg || '', it.estado || '',
+      it.isOutlier ? 'Sim' : 'Não', it.curva || '', safeURL(it.linkCompra) || ''
     ]));
 
     const wsAll = XLSX.utils.aoa_to_sheet([header, ...toRows(d.precos)]);
-    wsAll['!cols'] = [
-      {wch:12},{wch:60},{wch:14},{wch:12},{wch:14},
-      {wch:32},{wch:12},{wch:28},{wch:10},{wch:10},{wch:8},{wch:24}
-    ];
+    wsAll['!cols'] = [{wch:12},{wch:60},{wch:14},{wch:12},{wch:14},{wch:32},{wch:12},{wch:28},{wch:10},{wch:10},{wch:8},{wch:24}];
     XLSX.utils.book_append_sheet(wb, wsAll, 'Resultados');
 
     const groups = { A: [], B: [], C: [], 'N/D': [] };
-    d.precos.forEach(p => {
-      const k = (p && typeof p.curva === 'string' && ['A','B','C'].includes(p.curva)) ? p.curva : 'N/D';
-      groups[k].push(p);
-    });
+    d.precos.forEach(p => { const k = (p && typeof p.curva === 'string' && ['A','B','C'].includes(p.curva)) ? p.curva : 'N/D'; groups[k].push(p); });
+    ['A','B','C'].forEach(curva => { const arr = groups[curva]; if (!arr || arr.length === 0) return;
+      const ws = XLSX.utils.aoa_to_sheet([header, ...toRows(arr)]); ws['!cols'] = wsAll['!cols']; XLSX.utils.book_append_sheet(wb, ws, `Curva ${curva}`); });
+    if (groups['N/D'] && groups['N/D'].length) { const wsND = XLSX.utils.aoa_to_sheet([header, ...toRows(groups['N/D'])]); wsND['!cols'] = wsAll['!cols']; XLSX.utils.book_append_sheet(wb, wsND, 'Curva ND'); }
 
-    ['A','B','C'].forEach(curva => {
-      const arr = groups[curva];
-      if (!arr || arr.length === 0) return;
-      const ws = XLSX.utils.aoa_to_sheet([header, ...toRows(arr)]);
-      ws['!cols'] = wsAll['!cols'];
-      XLSX.utils.book_append_sheet(wb, ws, `Curva ${curva}`);
-    });
-
-    if (groups['N/D'] && groups['N/D'].length) {
-      const wsND = XLSX.utils.aoa_to_sheet([header, ...toRows(groups['N/D'])]);
-      wsND['!cols'] = wsAll['!cols'];
-      XLSX.utils.book_append_sheet(wb, wsND, 'Curva ND');
-    }
-
-    const ts = new Date();
-    const yyyy = ts.getFullYear();
-    const mm = String(ts.getMonth()+1).padStart(2,'0');
-    const dd = String(ts.getDate()).padStart(2,'0');
-    const hh = String(ts.getHours()).padStart(2,'0');
-    const mi = String(ts.getMinutes()).padStart(2,'0');
+    const ts = new Date(); const yyyy = ts.getFullYear(); const mm = String(ts.getMonth()+1).padStart(2,'0'); const dd = String(ts.getDate()).padStart(2,'0'); const hh = String(ts.getHours()).padStart(2,'0'); const mi = String(ts.getMinutes()).padStart(2,'0');
     const filename = `ZePrecos_${yyyy}${mm}${dd}_${hh}${mi}.xlsx`;
-
     XLSX.writeFile(wb, filename);
   }
 });

@@ -1139,5 +1139,138 @@ body {
     max-height: 64px;                 /* ajuste o quanto quiser no celular */
   }
 }
+.suppliers-section {
+  margin-top: 24px;
+}
 
+.suppliers-title {
+  font-weight: 600;
+  font-size: 1.05rem;
+  margin: 0 0 10px 0;
+  padding: 10px 14px;
+  background: #eef6ff;
+  color: #0b4aa2;
+  border: 1px solid #dbeafe;
+  border-radius: 10px;
+}
+
+/* mensagem de carregamento/erro */
+.suppliers-loading { margin: 6px 0 10px; font-size: .95rem; color: #475569; }
+.suppliers-loading.hidden { display: none; }
+.suppliers-error { color: #b91c1c; margin: 6px 0 12px; }
+
+/* container com rolagem horizontal no mobile */
+#suppliers-table { overflow-x: auto; }
+
+/* herdando seu .results-table; aqui só ajustes finos da tabela de fornecedores */
+.results-table.suppliers-table th:nth-child(3),
+.results-table.suppliers-table td:nth-child(3), /* Amostras */
+.results-table.suppliers-table th:nth-child(4),
+.results-table.suppliers-table td:nth-child(4), /* Preço médio */
+.results-table.suppliers-table th:nth-child(5),
+.results-table.suppliers-table td:nth-child(5), /* CV */
+.results-table.suppliers-table th:nth-child(9),
+.results-table.suppliers-table td:nth-child(9)  /* Score */
+{ text-align: right; white-space: nowrap; }
+
+.results-table.suppliers-table td:nth-child(6),
+.results-table.suppliers-table td:nth-child(7) { /* UFs / Marcas */
+  max-width: 320px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* “botão com cara de link” para abrir o modal */
+.as-link {
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  color: #1d4ed8;          /* azul link */
+  text-decoration: underline;
+  font: inherit;
+}
+.as-link:hover { text-decoration: none; }
+
+/* detalhes visuais reutilizáveis */
+.muted { color: #6b7280; }
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: .75rem;
+  line-height: 1.2;
+  border: 1px solid transparent;
+}
+.badge-ok { background: #ecfdf5; color: #065f46; border-color: #a7f3d0; }
+.badge-danger { background: #fef2f2; color: #991b1b; border-color: #fecaca; }
+
+/* ====== Modal de Penalidades (mesmo visual do app) ====== */
+.sanctions-modal { position: fixed; inset: 0; z-index: 9999; display: block; }
+.sanctions-modal.hidden { display: none; }
+.sm-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,.45); }
+.sm-dialog {
+  position: relative;
+  max-width: 980px;
+  margin: 5vh auto;
+  background: #fff;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 20px 40px rgba(0,0,0,.20);
+}
+.sanctions-head { margin: 0 0 10px 0; font-size: 1.1rem; }
+.sm-close {
+  position: absolute; right: 12px; top: 10px;
+  border: 0; background: transparent; font-size: 24px; cursor: pointer;
+}
+body.modal-open { overflow: hidden; }
+
+/* tabela dentro do modal reaproveita .results-table;
+   aqui só evita quebra feia em colunas longas */
+.sanctions-modal .results-table td:nth-child(4) { /* Fundamentação */
+  max-width: 360px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sanctions-modal .results-table td:nth-child(3) { /* Órgão */
+  max-width: 240px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* ====== Extras (se ainda não tiver) ====== */
+.outlier-row { background: #fff7ed; }               /* linha com outlier */
+.tag-curve {
+  margin-left: 6px; padding: 2px 6px; border-radius: 6px;
+  background: #eef2ff; color: #3730a3; font-size: .75rem;
+}
+.tag-outlier {
+  padding: 2px 6px; border-radius: 6px; background: #fee2e2; color: #991b1b;
+  font-size: .75rem; border: 1px solid #fecaca;
+}
+
+/* linha de ações (Exportar/Análise) */
+.actions-row {
+  display: flex; gap: 10px; margin-top: 12px;
+}
+.actions-row .submit-button {
+  border-radius: 10px;
+}
+.pen-badge{
+  display:inline-block; padding:4px 8px; border-radius:999px;
+  font-weight:700; font-size:12px; line-height:1; border:1px solid transparent;
+}
+.pen-on{  background:#e7f6ec; color:#136c3e; border-color:#bfe5cb; }
+.pen-off{ background:#f2f4f7; color:#475467; border-color:#e3e8ef; }
+.pen-unknown{ background:#fff3cd; color:#7a5b00; border-color:#ffe08a; }
+.pen-note{ color:#667085; margin-left:8px; font-size:12px; }
+
+.idcompra-cell, .ultima-venda-cell { display: inline-flex; align-items: center; gap: .5rem; }
+.idcompra-cell code { padding: 0 .25rem; background: #f3f4f6; border-radius: .25rem; }
+.btn-copy-id { border: 0; background: transparent; cursor: pointer; font-size: 0.95em; }
+/* Coluna "ID Compra": largura estável e sem quebra */
+.results-table th:nth-child(1),
+.results-table td:nth-child(1) {
+  width: 22ch;           /* ajuste fino se o ID for maior/menor */
+  min-width: 22ch;
+  white-space: nowrap;   /* impede quebra do número */
+}
 
