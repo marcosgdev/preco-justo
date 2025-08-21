@@ -2,7 +2,7 @@
 
 Ferramenta online gratuita para consulta e análise de preços de itens e serviços no ComprasGov.  
 Focada em apoiar **compradores públicos, analistas e gestores**.  
-Esta é a segunda versão e está em evolução contínua.
+Esta é a terceira versão e está em evolução contínua.
 
 ---
 
