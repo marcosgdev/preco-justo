@@ -208,7 +208,7 @@ function compraUrl(id) {
 
 
   // Seus deploys GAS
-  const BACKEND_PRICES_URL    = 'https://script.google.com/macros/s/AKfycbzIXedmyERlbRKgEiJU61INklvP9KES6GHb268UT0IbcT8ALlVeJ8wIZa0WVShlnYRq/exec';
+  const BACKEND_PRICES_URL    = 'https://script.google.com/macros/s/AKfycbwaCjqYmd1hD-4aUFeOv9kyUwW7PD7Nq8_qn8-Wk97tW8u3JDyYtO7A8WymnX0KfJD3/exec';
   const BACKEND_SUPPLIERS_URL = 'https://script.google.com/macros/s/AKfycbytIZagCuuzHmxOV3GSmFnPvcl8jtnMIR3BeMCFIjILmX-qLZVvotiNnlw1Kbpdqh0k/exec';
 
   const MAX_PAGINAS_PADRAO = 2;
