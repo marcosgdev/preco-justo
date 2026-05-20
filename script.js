@@ -208,11 +208,114 @@ function compraUrl(id) {
 
 
   // Seus deploys GAS
-  const BACKEND_PRICES_URL    = 'https://script.google.com/macros/s/AKfycbyoqwSeSabzmUsNcn06nB6LAy0Hz9UKYGvHyV5hJArN9qfIi0qRfm9Z4CCFoFfPK4da/exec';
+  const BACKEND_PRICES_URL    = 'https://script.google.com/macros/s/AKfycbzIXedmyERlbRKgEiJU61INklvP9KES6GHb268UT0IbcT8ALlVeJ8wIZa0WVShlnYRq/exec';
   const BACKEND_SUPPLIERS_URL = 'https://script.google.com/macros/s/AKfycbytIZagCuuzHmxOV3GSmFnPvcl8jtnMIR3BeMCFIjILmX-qLZVvotiNnlw1Kbpdqh0k/exec';
 
   const MAX_PAGINAS_PADRAO = 2;
   let inflightCtrl = null;
+
+  /* ── Autocomplete de catálogo ── */
+  (function initCatalogAutocomplete() {
+    const searchInput  = document.getElementById('catalog_search');
+    const dropdown     = document.getElementById('catalog-dropdown');
+    const badgeEl      = document.getElementById('selected-catalog-item');
+    const catmatHidden = document.getElementById('catmat_code');
+    const catserHidden = document.getElementById('catser_code');
+    const btnPesquisa  = document.getElementById('btn-pesquisa');
+    if (!searchInput || !dropdown) return;
+
+    let debounceTimer = null;
+    let activeIdx = -1;
+    let currentItems = [];
+
+    function clearSelection() {
+      catmatHidden.value = '';
+      catserHidden.value = '';
+      if (btnPesquisa) btnPesquisa.disabled = true;
+      if (badgeEl) badgeEl.classList.add('hidden');
+    }
+
+    function selectItem(item) {
+      catmatHidden.value = item.codigo;
+      catserHidden.value = '';
+      if (btnPesquisa) btnPesquisa.disabled = false;
+      closeDropdown();
+      searchInput.value = item.descricao;
+      if (badgeEl) {
+        badgeEl.classList.remove('hidden');
+        badgeEl.innerHTML = `
+          <span class="sel-code">CATMAT ${escapeHTML(item.codigo)}</span>
+          <span class="sel-desc">${escapeHTML(item.descricao)}${item.unidade ? ' — ' + escapeHTML(item.unidade) : ''}</span>
+          <button type="button" class="sel-clear" title="Limpar seleção">✕</button>`;
+        badgeEl.querySelector('.sel-clear').addEventListener('click', () => {
+          clearSelection();
+          searchInput.value = '';
+          searchInput.focus();
+        });
+      }
+    }
+
+    function openDropdown()  { dropdown.classList.add('open'); }
+    function closeDropdown() { dropdown.classList.remove('open'); activeIdx = -1; }
+
+    function renderItems(items) {
+      currentItems = items;
+      activeIdx = -1;
+      if (!items.length) {
+        dropdown.innerHTML = '<div class="catalog-dropdown-msg">Nenhum item encontrado.</div>';
+        openDropdown(); return;
+      }
+      dropdown.innerHTML = items.map((it, i) => `
+        <div class="catalog-item" data-idx="${i}">
+          <span class="catalog-item__code">CATMAT ${escapeHTML(it.codigo)}</span>
+          <span class="catalog-item__desc">${escapeHTML(it.descricao)}</span>
+          ${it.unidade ? `<span class="catalog-item__unit">${escapeHTML(it.unidade)}</span>` : ''}
+        </div>`).join('');
+      dropdown.querySelectorAll('.catalog-item').forEach(el => {
+        el.addEventListener('mousedown', (e) => { e.preventDefault(); selectItem(currentItems[+el.dataset.idx]); });
+      });
+      openDropdown();
+    }
+
+    async function searchCatalog(q) {
+      dropdown.innerHTML = '<div class="catalog-dropdown-msg">Buscando...</div>';
+      openDropdown();
+      try {
+        const params = new URLSearchParams({ action: 'catalogo', q });
+        const res  = await fetch(BACKEND_PRICES_URL + '?' + params.toString());
+        const data = await res.json();
+        if (data.success && data.items && data.items.length) {
+          renderItems(data.items);
+        } else {
+          dropdown.innerHTML = `<div class="catalog-dropdown-msg">${escapeHTML(data.message || 'Nenhum resultado.')}</div>`;
+        }
+      } catch (_) {
+        dropdown.innerHTML = '<div class="catalog-dropdown-msg">Erro ao buscar. Tente novamente.</div>';
+      }
+    }
+
+    searchInput.addEventListener('input', () => {
+      clearSelection();
+      const q = searchInput.value.trim();
+      clearTimeout(debounceTimer);
+      if (q.length < 3) { closeDropdown(); return; }
+      debounceTimer = setTimeout(() => searchCatalog(q), 350);
+    });
+
+    searchInput.addEventListener('keydown', (e) => {
+      const items = dropdown.querySelectorAll('.catalog-item');
+      if (e.key === 'ArrowDown') { e.preventDefault(); activeIdx = Math.min(activeIdx + 1, items.length - 1); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); activeIdx = Math.max(activeIdx - 1, 0); }
+      else if (e.key === 'Enter' && activeIdx >= 0) { e.preventDefault(); selectItem(currentItems[activeIdx]); return; }
+      else if (e.key === 'Escape') { closeDropdown(); return; }
+      items.forEach((el, i) => el.classList.toggle('active', i === activeIdx));
+      if (activeIdx >= 0 && items[activeIdx]) items[activeIdx].scrollIntoView({ block: 'nearest' });
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!dropdown.contains(e.target) && e.target !== searchInput) closeDropdown();
+    });
+  })();
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();

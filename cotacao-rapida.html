@@ -31,17 +31,18 @@
             </div>
 
             <form class="price-form">
-                <div class="form-group">
-                    <label for="catmat_code">Código CATMAT</label>
-                    <input type="text" id="catmat_code" name="catmat_code" autocomplete="off">
-                    <span class="form-hint">O Código CATMAT é o código do item de material.</span>
+                <div class="form-group autocomplete-wrapper">
+                    <label for="catalog_search">Buscar item</label>
+                    <input type="text" id="catalog_search" name="catalog_search" autocomplete="off"
+                           placeholder="Ex: dipirona, papel A4, caneta esferográfica...">
+                    <div id="catalog-dropdown" class="catalog-dropdown"></div>
+                    <span class="form-hint">Digite a descrição e selecione o item CATMAT desejado.</span>
                 </div>
-                <div class="form-group">
-                    <label for="catser_code">Código CATSER</label>
-                    <input type="text" id="catser_code" name="catser_code" autocomplete="off">
-                    <span class="form-hint">O Código CATSER é o código do item de serviço.</span>
-                </div>
-                <button type="submit" class="submit-button">SOLICITAR PESQUISA</button>
+                <div id="selected-catalog-item" class="selected-catalog-item hidden"></div>
+                <!-- Campos ocultos preenchidos pelo autocomplete -->
+                <input type="hidden" id="catmat_code" name="catmat_code">
+                <input type="hidden" id="catser_code" name="catser_code">
+                <button type="submit" class="submit-button" id="btn-pesquisa" disabled>SOLICITAR PESQUISA</button>
                 <a href="index.html" class="back-button">VOLTAR AO MENU PRINCIPAL</a>
             </form>
 
@@ -57,7 +58,7 @@
     </footer>
 
     <!-- Seu JS principal (use a versão corrigida que te enviei) -->
-    <script src="script.js?v=17"></script>
+    <script src="script.js?v=20"></script>
 
     <!-- Amarração do botão "Ir para Análise de Mercado" -->
     <script>
