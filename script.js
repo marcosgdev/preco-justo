@@ -385,11 +385,12 @@ function compraUrl(id) {
     clearErrors();
     resultsContainer.innerHTML = '';
 
-    window.__lastSummary  = '';
-    window.__curveMeta    = null;
-    window.__lastData     = null;
-    window.__curveStats   = null;
-    window.__recommended  = null;
+    window.__lastSummary     = '';
+    window.__curveMeta       = null;
+    window.__lastData        = null;
+    window.__curveStats      = null;
+    window.__recommended     = null;
+    window.__lastFornecedores = [];
 
     removeGoToAnalysisButton();
 
@@ -461,6 +462,7 @@ function compraUrl(id) {
           console.log('[fornecedores] total:', fornecedores?.length || 0);
           console.log('[sanctionsIndex] chaves (amostra):', Object.keys(sancIndex || {}).slice(0,10));
 
+          window.__lastFornecedores = fornecedores || [];
           renderListaFornecedores(fornecedores, ensureSuppliersSection(), sancIndex);
         } catch (e2) {
           renderSuppliersError('Não foi possível listar fornecedores potenciais agora. Tente novamente mais tarde.');
@@ -747,7 +749,19 @@ function compraUrl(id) {
     btnEstat.rel = 'noopener';
     btnEstat.textContent = 'Detalhamento Estatístico';
 
+    const btnPDF = document.createElement('button');
+    btnPDF.type = 'button';
+    btnPDF.className = 'submit-button btn-export-pdf';
+    btnPDF.textContent = 'Relatório PDF (SEI)';
+    btnPDF.addEventListener('click', async () => {
+      btnPDF.disabled = true;
+      btnPDF.textContent = 'Gerando PDF…';
+      try { await gerarRelatorioPDF(); } catch (e) { console.error(e); alert('Erro ao gerar PDF: ' + e.message); }
+      finally { btnPDF.disabled = false; btnPDF.textContent = 'Relatório PDF (SEI)'; }
+    });
+
     wrap.appendChild(btnExport);
+    wrap.appendChild(btnPDF);
     wrap.appendChild(btnAnalyze);
     wrap.appendChild(btnEstat);
     resultsContainer.appendChild(wrap);
@@ -1105,4 +1119,395 @@ installCopyHandler(document);
     const filename = `ZePrecos_${yyyy}${mm}${dd}_${hh}${mi}.xlsx`;
     XLSX.writeFile(wb, filename);
   }
+
+  /* =========================================================
+     RELATÓRIO PDF — FORMAÇÃO DE PREÇO (SEI)
+     ========================================================= */
+
+  let _jspdfLoaded = false;
+  async function ensureJsPDFLoaded() {
+    if (_jspdfLoaded && window.jspdf) return;
+    const load = src => new Promise((res, rej) => {
+      const s = document.createElement('script');
+      s.src = src;
+      s.onload = res;
+      s.onerror = () => rej(new Error('Falha ao carregar: ' + src));
+      document.head.appendChild(s);
+    });
+    await load('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+    await load('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js');
+    _jspdfLoaded = true;
+  }
+
+  async function gerarRelatorioPDF() {
+    const d = window.__lastData;
+    if (!d || !Array.isArray(d.precos) || d.precos.length === 0) {
+      alert('Faça uma pesquisa primeiro para gerar o relatório.');
+      return;
+    }
+    await ensureJsPDFLoaded();
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+
+    const stats      = d.stats      || {};
+    const rec        = d.recommended || null;
+    const cs         = d.curveStats  || {};
+    const precos     = d.precos      || [];
+    const fornecs    = window.__lastFornecedores || [];
+
+    const BLUE  = [0, 53, 128];
+    const DARK  = [30, 30, 30];
+    const GRAY  = [100, 100, 100];
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const mg    = 14;
+    const cW    = pageW - mg * 2;
+
+    const fmtR  = v => (typeof v === 'number' && isFinite(v))
+      ? v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+      : 'N/D';
+    const fmtN  = v => (v != null && v !== '') ? String(v) : 'N/D';
+    const fmtCV = v => (v != null) ? Number(v).toFixed(1) + '%' : 'N/D';
+    const cvVal = (mean, std) => (mean && std) ? (std / mean * 100) : null;
+
+    const now     = new Date();
+    const dateStr = now.toLocaleDateString('pt-BR');
+    const selItem = (window.__selectedItems || [])[0];
+    const itemCode = document.getElementById('catmat_code')?.value
+                  || document.getElementById('catser_code')?.value || '';
+    const itemType = document.getElementById('catmat_code')?.value ? 'CATMAT' : 'CATSER';
+    const itemDesc = selItem?.descricao || d.grupos?.[0]?.descricao || '—';
+
+    /* ---- helper: cabeçalho de página ---- */
+    const miniHeader = (title) => {
+      doc.setFillColor(...BLUE);
+      doc.rect(0, 0, pageW, 12, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'bold');
+      doc.text(title, pageW / 2, 7.5, { align: 'center' });
+    };
+
+    /* ---- helper: logo via canvas (falha silenciosa) ---- */
+    const addLogo = async (sel, x, maxW, maxH) => {
+      try {
+        const img = document.querySelector(sel);
+        if (!img || !img.complete || !img.naturalWidth) return;
+        const cv = document.createElement('canvas');
+        cv.width  = img.naturalWidth;
+        cv.height = img.naturalHeight;
+        cv.getContext('2d').drawImage(img, 0, 0);
+        const ar = cv.width / cv.height;
+        let w = maxW, h = maxW / ar;
+        if (h > maxH) { h = maxH; w = maxH * ar; }
+        doc.addImage(cv.toDataURL('image/png'), 'PNG', x, (28 - h) / 2, w, h);
+      } catch (_) {}
+    };
+
+    /* ---- helper: separador de seção ---- */
+    const secTitle = (label, y) => {
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(...BLUE);
+      doc.setFontSize(9);
+      doc.text(label, mg, y);
+      doc.setDrawColor(200, 200, 200);
+      doc.setLineWidth(0.2);
+      doc.line(mg, y + 3, pageW - mg, y + 3);
+      return y + 7;
+    };
+
+    /* =========================================================
+       PÁGINA 1 — RESUMO EXECUTIVO
+       ========================================================= */
+
+    // Cabeçalho institucional
+    doc.setFillColor(...BLUE);
+    doc.rect(0, 0, pageW, 28, 'F');
+    await addLogo('.tjpa-logo', mg, 36, 22);
+    await addLogo('.sead-logo', pageW - mg - 32, 30, 22);
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(11); doc.setFont('helvetica', 'bold');
+    doc.text('TRIBUNAL DE JUSTIÇA DO ESTADO DO PARÁ', pageW / 2, 10, { align: 'center' });
+    doc.setFontSize(8.5); doc.setFont('helvetica', 'normal');
+    doc.text('Secretaria de Administração — Divisão de Compras', pageW / 2, 16, { align: 'center' });
+    doc.setFontSize(7.5);
+    doc.text('Sistema Preço Justo · Dados: ComprasGov/CATMAT', pageW / 2, 22, { align: 'center' });
+
+    let y = 35;
+
+    // Título
+    doc.setTextColor(...BLUE);
+    doc.setFontSize(13); doc.setFont('helvetica', 'bold');
+    doc.text('RELATÓRIO EXECUTIVO DE FORMAÇÃO DE PREÇO', pageW / 2, y, { align: 'center' });
+    y += 2;
+    doc.setDrawColor(...BLUE); doc.setLineWidth(0.6);
+    doc.line(mg, y, pageW - mg, y);
+    y += 7;
+
+    // Identificação do item
+    y = secTitle('IDENTIFICAÇÃO DO ITEM', y);
+    doc.setFont('helvetica', 'normal'); doc.setTextColor(...DARK); doc.setFontSize(9);
+    const lW = 42;
+    [
+      ['Código ' + itemType + ':', itemCode || '—'],
+      ['Descrição:', doc.splitTextToSize(itemDesc, cW - lW).join(' ')],
+      ['Data da Pesquisa:', dateStr],
+      ['Fonte:', 'ComprasGov — Portal de Compras do Governo Federal (CATMAT/CATSER)'],
+    ].forEach(([lbl, val]) => {
+      doc.setFont('helvetica', 'bold'); doc.text(lbl, mg, y);
+      doc.setFont('helvetica', 'normal');
+      const lines = doc.splitTextToSize(String(val), cW - lW);
+      doc.text(lines, mg + lW, y);
+      y += lines.length > 1 ? lines.length * 4.5 : 5.5;
+    });
+    y += 2;
+
+    // Resumo estatístico
+    y = secTitle('RESUMO ESTATÍSTICO DO MERCADO', y);
+    doc.autoTable({
+      startY: y,
+      body: [
+        ['Registros analisados', fmtN(stats.n),        'Outliers identificados', fmtN(stats.outliersCount)],
+        ['Preço médio',          fmtR(stats.mean),      'Preço mediano',          fmtR(stats.median)],
+        ['Desvio padrão',        fmtR(stats.std),       'Coef. de Variação (CV)', fmtCV(cvVal(stats.mean, stats.std))],
+        ['Percentil 5 (P5)',     fmtR(stats.p05),       'Percentil 95 (P95)',     fmtR(stats.p95)],
+        ['Registros Curva A',    fmtN(d.curves?.counts?.A), 'Registros Curva B/C', fmtN(d.curves?.counts?.B) + ' / ' + fmtN(d.curves?.counts?.C)],
+      ],
+      theme: 'grid',
+      styles: { fontSize: 8.5, cellPadding: 2.5, textColor: DARK },
+      columnStyles: {
+        0: { fontStyle: 'bold', fillColor: [240, 245, 255], cellWidth: cW * 0.28 },
+        1: { cellWidth: cW * 0.22 },
+        2: { fontStyle: 'bold', fillColor: [240, 245, 255], cellWidth: cW * 0.28 },
+        3: { cellWidth: cW * 0.22 },
+      },
+      margin: { left: mg, right: mg },
+    });
+    y = doc.lastAutoTable.finalY + 6;
+
+    // Curva recomendada
+    if (rec?.curve) {
+      const rcs = cs[rec.curve] || {};
+      const recPrice = rcs.median ?? rcs.mean ?? rec.stats?.median ?? rec.stats?.mean;
+      const recCV    = rcs.cv    ?? (rcs.mean && rcs.std ? rcs.std / rcs.mean * 100 : rec.stats?.cv);
+      const recN     = rcs.n     ?? rec.stats?.n;
+
+      y = secTitle('CURVA RECOMENDADA PARA REFERÊNCIA DE PREÇO', y);
+
+      doc.setFillColor(240, 245, 255);
+      doc.setDrawColor(...BLUE); doc.setLineWidth(0.5);
+      doc.roundedRect(mg, y, cW, 20, 2, 2, 'FD');
+      doc.setFont('helvetica', 'bold'); doc.setTextColor(...BLUE); doc.setFontSize(10);
+      doc.text('✓ Curva ' + rec.curve + ' — Recomendada', mg + 5, y + 7);
+      doc.setFont('helvetica', 'normal'); doc.setTextColor(...DARK); doc.setFontSize(8.5);
+      doc.text(
+        'CV: ' + fmtCV(recCV) + '   |   Amostras: ' + fmtN(recN) +
+        '   |   Média: ' + fmtR(rcs.mean ?? rec.stats?.mean) +
+        '   |   Mediana: ' + fmtR(rcs.median ?? rec.stats?.median),
+        mg + 5, y + 13
+      );
+      const reason = doc.splitTextToSize(
+        'Justificativa: ' + (rec.reason || 'Curva com menor coeficiente de variação e número de contratações suficientes (≥ 3).'),
+        cW - 10
+      );
+      doc.setFontSize(7.5); doc.setTextColor(...GRAY);
+      doc.text(reason, mg + 5, y + 18.5);
+      y += 26;
+
+      if (recPrice != null) {
+        doc.setFillColor(...BLUE);
+        doc.rect(mg, y, cW, 16, 'F');
+        doc.setTextColor(255, 255, 255);
+        doc.setFontSize(8.5); doc.setFont('helvetica', 'normal');
+        doc.text('PREÇO DE REFERÊNCIA PROPOSTO  (mediana da Curva ' + rec.curve + ')', pageW / 2, y + 6, { align: 'center' });
+        doc.setFontSize(15); doc.setFont('helvetica', 'bold');
+        doc.text(fmtR(recPrice), pageW / 2, y + 13, { align: 'center' });
+        y += 21;
+      }
+    }
+    y += 3;
+
+    // Estatísticas por curva
+    const curveRows = ['A', 'B', 'C']
+      .filter(c => cs[c]?.n > 0)
+      .map(c => {
+        const s = cs[c];
+        return [
+          (rec?.curve === c ? '✓ ' : '') + 'Curva ' + c + (rec?.curve === c ? ' (Recomendada)' : ''),
+          fmtN(s.n), fmtR(s.mean), fmtR(s.median), fmtR(s.std), fmtCV(s.cv),
+        ];
+      });
+
+    if (curveRows.length) {
+      y = secTitle('ESTATÍSTICAS POR CURVA DE MERCADO', y);
+      doc.autoTable({
+        startY: y,
+        head: [['Curva', 'Amostras (n)', 'Média', 'Mediana', 'Desvio Padrão', 'CV%']],
+        body: curveRows,
+        theme: 'striped',
+        headStyles: { fillColor: BLUE, textColor: [255, 255, 255], fontSize: 8.5, fontStyle: 'bold' },
+        styles: { fontSize: 8.5, cellPadding: 2.5 },
+        columnStyles: {
+          0: { fontStyle: 'bold' },
+          1: { halign: 'center' },
+          2: { halign: 'right' },
+          3: { halign: 'right' },
+          4: { halign: 'right' },
+          5: { halign: 'right' },
+        },
+        didParseCell(data) {
+          if (data.section === 'body' && String(data.row.raw[0]).startsWith('✓')) {
+            data.cell.styles.fillColor    = [235, 245, 255];
+            data.cell.styles.fontStyle    = 'bold';
+            data.cell.styles.textColor    = BLUE;
+          }
+        },
+        margin: { left: mg, right: mg },
+      });
+      y = doc.lastAutoTable.finalY + 6;
+    }
+
+    // Fundamentação legal
+    if (y > pageH - 60) { doc.addPage(); miniHeader('RELATÓRIO EXECUTIVO DE FORMAÇÃO DE PREÇO — TJPA/SEAD'); y = 18; }
+    y = secTitle('FUNDAMENTAÇÃO LEGAL', y);
+    doc.setFont('helvetica', 'normal'); doc.setTextColor(...DARK); doc.setFontSize(8);
+    const legalLines = [
+      'Pesquisa de preços realizada em conformidade com o art. 23 da Lei nº 14.133/2021 (Nova Lei de Licitações e',
+      'Contratos Administrativos) e com a Instrução Normativa SEGES/ME nº 65/2021, que estabelecem os critérios',
+      'para a pesquisa e apuração do preço de referência nas aquisições públicas.',
+      '',
+      'Os dados foram obtidos do sistema ComprasGov (CATMAT/CATSER) do Ministério da Gestão e Inovação em',
+      'Serviços Públicos, contemplando contratações realizadas pela Administração Pública Federal.',
+      '',
+      'A classificação por Curvas de Mercado (A, B e C) é baseada no Coeficiente de Variação (CV) dos preços.',
+      'A curva recomendada é aquela com CV ≤ 25% e no mínimo 3 contratações, garantindo maior',
+      'representatividade e estabilidade estatística do preço de referência apurado.',
+    ];
+    legalLines.forEach(l => { if (!l) { y += 2; return; } doc.text(l, mg, y); y += 4; });
+    y += 5;
+
+    // Campos de assinatura
+    if (y > pageH - 45) { doc.addPage(); miniHeader('RELATÓRIO EXECUTIVO DE FORMAÇÃO DE PREÇO — TJPA/SEAD'); y = 18; }
+    y = secTitle('RESPONSABILIDADE TÉCNICA', y);
+    const sW = (cW - 10) / 2;
+    doc.setDrawColor(...DARK); doc.setLineWidth(0.3);
+    doc.line(mg,          y + 15, mg + sW,          y + 15);
+    doc.line(mg + sW + 10, y + 15, mg + sW * 2 + 10, y + 15);
+    doc.setFont('helvetica', 'normal'); doc.setTextColor(...DARK); doc.setFontSize(8);
+    doc.text('Responsável pela Pesquisa de Preços', mg + sW / 2, y + 19, { align: 'center' });
+    doc.text('Autoridade Competente', mg + sW + 10 + sW / 2, y + 19, { align: 'center' });
+    doc.setFontSize(7); doc.setTextColor(...GRAY);
+    doc.text('Nome / Matrícula / Cargo', mg + sW / 2, y + 23, { align: 'center' });
+    doc.text('Nome / Matrícula / Cargo', mg + sW + 10 + sW / 2, y + 23, { align: 'center' });
+    y += 32;
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(...DARK);
+    doc.text('Belém (PA), _____ de _________________ de ' + now.getFullYear() + '.', pageW / 2, y, { align: 'center' });
+
+    /* =========================================================
+       PÁGINA 2 — REGISTROS DE PREÇO
+       ========================================================= */
+    doc.addPage();
+    miniHeader('RELATÓRIO EXECUTIVO DE FORMAÇÃO DE PREÇO — TJPA/SEAD');
+    y = 18;
+
+    const recCurve = rec?.curve;
+    let recRows = recCurve
+      ? precos.filter(p => p.curva === recCurve && !p.isOutlier)
+      : precos.filter(p => !p.isOutlier);
+    if (recRows.length === 0) recRows = precos.slice(0, 50);
+    recRows = recRows.slice(0, 60);
+
+    y = secTitle(
+      recCurve
+        ? 'REGISTROS DE PREÇO — CURVA ' + recCurve + ' (RECOMENDADA) — ' + recRows.length + ' registro(s)'
+        : 'REGISTROS DE PREÇO — ' + recRows.length + ' registro(s)',
+      y
+    );
+
+    doc.autoTable({
+      startY: y,
+      head: [['Data', 'Fornecedor', 'Preço Unit.', 'Qtd.', 'UASG / Órgão', 'UF']],
+      body: recRows.map(p => [
+        fmtDateBR(p.dataCompra),
+        (p.nomeFornecedor || '—').substring(0, 42),
+        fmtR(p.precoUnitario),
+        fmtN(p.quantidade),
+        (p.nomeUasg || p.codigoUasg || '—').substring(0, 38),
+        p.estado || '—',
+      ]),
+      theme: 'striped',
+      headStyles: { fillColor: BLUE, textColor: [255, 255, 255], fontSize: 8, fontStyle: 'bold' },
+      styles: { fontSize: 7.5, cellPadding: 2 },
+      columnStyles: {
+        0: { cellWidth: 22 },
+        1: { cellWidth: 60 },
+        2: { halign: 'right', cellWidth: 24 },
+        3: { halign: 'center', cellWidth: 12 },
+        4: { cellWidth: 48 },
+        5: { halign: 'center', cellWidth: 11 },
+      },
+      margin: { left: mg, right: mg },
+    });
+
+    /* =========================================================
+       PÁGINA 3 — FORNECEDORES POTENCIAIS (se houver)
+       ========================================================= */
+    if (fornecs.length > 0) {
+      doc.addPage();
+      miniHeader('RELATÓRIO EXECUTIVO DE FORMAÇÃO DE PREÇO — TJPA/SEAD');
+      y = 18;
+      y = secTitle('FORNECEDORES POTENCIAIS — ' + Math.min(fornecs.length, 25) + ' registro(s)', y);
+
+      doc.autoTable({
+        startY: y,
+        head: [['Fornecedor', 'CNPJ', 'Preço Médio', 'CV%', 'Amostras', 'UFs', 'Sanções']],
+        body: fornecs.slice(0, 25).map(f => [
+          (f.nome || f.nomeFornecedor || '—').substring(0, 40),
+          formatCNPJ(f.cnpj || ''),
+          fmtR(f.precoMedio ?? f.media ?? f.precoUnitario),
+          fmtCV(f.cv),
+          fmtN(f.amostras ?? f.n),
+          (Array.isArray(f.ufs) ? f.ufs : Array.isArray(f.estados) ? f.estados : []).slice(0, 5).join(', ') || '—',
+          f.sancoes ? 'SIM' : 'Não',
+        ]),
+        theme: 'striped',
+        headStyles: { fillColor: BLUE, textColor: [255, 255, 255], fontSize: 8, fontStyle: 'bold' },
+        styles: { fontSize: 7.5, cellPadding: 2 },
+        columnStyles: {
+          0: { cellWidth: 56 },
+          1: { cellWidth: 30 },
+          2: { halign: 'right', cellWidth: 24 },
+          3: { halign: 'right', cellWidth: 12 },
+          4: { halign: 'center', cellWidth: 18 },
+          5: { cellWidth: 20 },
+          6: { halign: 'center', cellWidth: 17 },
+        },
+        didParseCell(data) {
+          if (data.section === 'body' && data.column.index === 6 && data.cell.raw === 'SIM') {
+            data.cell.styles.textColor  = [180, 0, 0];
+            data.cell.styles.fontStyle  = 'bold';
+          }
+        },
+        margin: { left: mg, right: mg },
+      });
+    }
+
+    /* ---- Rodapé em todas as páginas ---- */
+    const total = doc.internal.getNumberOfPages();
+    for (let i = 1; i <= total; i++) {
+      doc.setPage(i);
+      const pH = doc.internal.pageSize.getHeight();
+      doc.setFillColor(245, 247, 250);
+      doc.rect(0, pH - 9, pageW, 9, 'F');
+      doc.setFontSize(6.5); doc.setTextColor(...GRAY); doc.setFont('helvetica', 'normal');
+      doc.text('Gerado em: ' + dateStr + ' · Sistema Preço Justo — TJPA/SEAD · Dados: ComprasGov', mg, pH - 3);
+      doc.text('Página ' + i + ' de ' + total, pageW - mg, pH - 3, { align: 'right' });
+    }
+
+    const yyyy2 = now.getFullYear();
+    const mm2   = String(now.getMonth() + 1).padStart(2, '0');
+    const dd2   = String(now.getDate()).padStart(2, '0');
+    doc.save('RelatorioFormacaoPreco_' + (itemCode || 'item') + '_' + yyyy2 + mm2 + dd2 + '.pdf');
+  }
+
 });

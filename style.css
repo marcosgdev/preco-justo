@@ -1023,11 +1023,20 @@ body {
 
 /* herdando sua classe base .submit-button; só ajusta cores se quiser */
 .btn-export-xlsx{
-  /* exemplo de cor alternativa pro export */
-  background: #16a34a; /* verde */
+  background: #16a34a;
 }
 .btn-export-xlsx:hover{
   background: #15803d;
+}
+.btn-export-pdf{
+  background: #b91c1c;
+}
+.btn-export-pdf:hover{
+  background: #991b1b;
+}
+.btn-export-pdf:disabled{
+  background: #9ca3af;
+  cursor: not-allowed;
 }
 /* Layout do header */
 .header{
