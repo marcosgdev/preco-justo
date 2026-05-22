@@ -11,7 +11,8 @@ const MAX_HISTORY   = 6; // últimas N mensagens enviadas (limite 30k tokens GPT
 const chatState = {
   messages:        [],   // { role: 'user'|'assistant', content: '' }
   loading:         false,
-  lastCatmatCodes: []
+  lastCatmatCodes: [],
+  lastPriceData:   null
 };
 
 /* =================================================================
@@ -135,6 +136,7 @@ async function sendMessage(text) {
     chatState.messages.push({ role: 'assistant', content: reply });
 
     if (data.catmat_codes?.length) chatState.lastCatmatCodes = data.catmat_codes;
+    if (data.priceData)           chatState.lastPriceData   = data.priceData;
 
     appendMessage('assistant', reply, buildActions(data));
     if (data.priceData) renderPriceCardInChat(data.priceData);
@@ -166,7 +168,16 @@ function buildActions(data) {
     const descParam = data.priceData?.item_pesquisado
       ? '&desc=' + encodeURIComponent(data.priceData.item_pesquisado) : '';
     actions.push({ label: '🔍 Ver cotação completa',    href: `cotacao-rapida.html?catmat=${param}` });
-    actions.push({ label: '📄 Relatório SEI (PDF)',     href: `cotacao-rapida.html?catmat=${param}&pdf=auto` });
+    if (data.priceData) {
+      const pd = data.priceData;
+      actions.push({ label: '📄 Relatório SEI (PDF)', onclick: async (btn) => {
+        const orig = btn.textContent;
+        btn.disabled = true; btn.textContent = 'Gerando PDF…';
+        try { await gerarPDFSEIFromData(pd); }
+        catch (e) { alert('Erro ao gerar PDF: ' + e.message); }
+        finally { btn.disabled = false; btn.textContent = orig; }
+      }});
+    }
     actions.push({ label: '📊 Análise de mercado',      href: `analise-mercado.html?type=catmat&code=${param}` });
     actions.push({ label: '📈 Detalhamento Estatístico', href: `analise-estatistica.html?type=catmat&code=${param}${descParam}` });
   }
@@ -193,15 +204,24 @@ function appendMessage(role, content, actions = []) {
     const row = document.createElement('div');
     row.className = 'chat-actions';
     for (const a of actions) {
-      const btn = document.createElement('a');
-      btn.className   = 'chat-action-btn';
-      btn.href        = a.href || '#';
-      btn.textContent = a.label;
-      if ((a.href || '').startsWith('http')) {
-        btn.target = '_blank';
-        btn.rel    = 'noopener noreferrer';
+      if (typeof a.onclick === 'function') {
+        const btn = document.createElement('button');
+        btn.type      = 'button';
+        btn.className = 'chat-action-btn';
+        btn.textContent = a.label;
+        btn.addEventListener('click', () => a.onclick(btn));
+        row.appendChild(btn);
+      } else {
+        const btn = document.createElement('a');
+        btn.className   = 'chat-action-btn';
+        btn.href        = a.href || '#';
+        btn.textContent = a.label;
+        if ((a.href || '').startsWith('http')) {
+          btn.target = '_blank';
+          btn.rel    = 'noopener noreferrer';
+        }
+        row.appendChild(btn);
       }
-      row.appendChild(btn);
     }
     wrap.appendChild(row);
   }
@@ -488,4 +508,223 @@ function escHTML(s) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+/* =================================================================
+   GERAÇÃO DE PDF SEI — inline, sem navegar para outra página
+   ================================================================= */
+async function ensureJsPDFLoaded() {
+  if (window.jspdf) return;
+  const load = src => new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = src; s.onload = res; s.onerror = rej;
+    document.head.appendChild(s);
+  });
+  await load('https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js');
+  await load('https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js');
+}
+
+async function gerarPDFSEIFromData(priceData) {
+  if (!priceData) { alert('Sem dados de preço para gerar o relatório.'); return; }
+
+  await ensureJsPDFLoaded();
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+
+  const m      = priceData.metricas || {};
+  const precos = priceData.compras_validas || [];
+
+  const BLUE  = [0, 53, 128];
+  const DARK  = [30, 30, 30];
+  const GRAY  = [100, 100, 100];
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const mg    = 14;
+  const cW    = pageW - mg * 2;
+
+  const fmtR  = v => (typeof v === 'number' && isFinite(v))
+    ? v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : 'N/D';
+  const fmtN  = v => (v != null && v !== '') ? String(v) : 'N/D';
+  const fmtCV = v => (v != null) ? Number(v).toFixed(1) + '%' : 'N/D';
+  const fmtDate = d => { try { return d ? new Date(d).toLocaleDateString('pt-BR') : '—'; } catch(_) { return '—'; } };
+
+  const now     = new Date();
+  const dateStr = now.toLocaleDateString('pt-BR');
+  const itemCode = priceData.code || '';
+  const itemDesc = priceData.item_pesquisado || '—';
+  const periodoInicio = fmtDate(priceData.periodo?.inicio);
+  const periodoFim    = fmtDate(priceData.periodo?.fim);
+
+  const miniHeader = (title) => {
+    doc.setFillColor(...BLUE);
+    doc.rect(0, 0, pageW, 12, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(8); doc.setFont('helvetica', 'bold');
+    doc.text(title, pageW / 2, 7.5, { align: 'center' });
+  };
+
+  const secTitle = (label, y) => {
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...BLUE);
+    doc.setFontSize(9);
+    doc.text(label, mg, y);
+    doc.setDrawColor(200, 200, 200); doc.setLineWidth(0.2);
+    doc.line(mg, y + 3, pageW - mg, y + 3);
+    return y + 7;
+  };
+
+  /* ── PÁGINA 1 — RESUMO EXECUTIVO ── */
+  doc.setFillColor(...BLUE);
+  doc.rect(0, 0, pageW, 28, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(11); doc.setFont('helvetica', 'bold');
+  doc.text('TRIBUNAL DE JUSTIÇA DO ESTADO DO PARÁ', pageW / 2, 10, { align: 'center' });
+  doc.setFontSize(8.5); doc.setFont('helvetica', 'normal');
+  doc.text('Secretaria de Administração — Divisão de Compras', pageW / 2, 16, { align: 'center' });
+  doc.setFontSize(7.5);
+  doc.text('Sistema Preço Justo · Dados: ComprasGov/CATMAT', pageW / 2, 22, { align: 'center' });
+
+  let y = 35;
+
+  doc.setTextColor(...BLUE);
+  doc.setFontSize(13); doc.setFont('helvetica', 'bold');
+  doc.text('RELATÓRIO EXECUTIVO DE FORMAÇÃO DE PREÇO', pageW / 2, y, { align: 'center' });
+  y += 2;
+  doc.setDrawColor(...BLUE); doc.setLineWidth(0.6);
+  doc.line(mg, y, pageW - mg, y);
+  y += 7;
+
+  y = secTitle('IDENTIFICAÇÃO DO ITEM', y);
+  doc.setFont('helvetica', 'normal'); doc.setTextColor(...DARK); doc.setFontSize(9);
+  const lW = 42;
+  [
+    ['Código CATMAT:',      itemCode || '—'],
+    ['Descrição:',          itemDesc],
+    ['Data da Pesquisa:',   dateStr],
+    ['Período dos Dados:',  periodoInicio + ' a ' + periodoFim],
+    ['Fonte:',              'ComprasGov — Portal de Compras do Governo Federal (CATMAT)'],
+  ].forEach(([lbl, val]) => {
+    doc.setFont('helvetica', 'bold'); doc.text(lbl, mg, y);
+    doc.setFont('helvetica', 'normal');
+    const lines = doc.splitTextToSize(String(val), cW - lW);
+    doc.text(lines, mg + lW, y);
+    y += lines.length > 1 ? lines.length * 4.5 : 5.5;
+  });
+  y += 2;
+
+  y = secTitle('RESUMO ESTATÍSTICO DO MERCADO (SANEAMENTO POR Z-SCORE ITERATIVO)', y);
+  doc.autoTable({
+    startY: y,
+    body: [
+      ['Total de registros encontrados', fmtN(m.total_encontrado),  'Outliers removidos',    fmtN(m.total_descartado)],
+      ['Amostra saneada (N)',            fmtN(m.amostra_valida_N),  'Coef. de Variação (CV)', fmtCV(m.cv)],
+      ['Preço médio saneado',            fmtR(m.media),             'Preço mediano saneado',  fmtR(m.mediana)],
+      ['Desvio padrão',                  fmtR(m.desvio_padrao),     'Amplitude',              fmtR(m.amplitude)],
+      ['Preço mínimo saneado',           fmtR(m.minimo),            'Preço máximo saneado',   fmtR(m.maximo)],
+      ['Unidade predominante',           fmtN(m.unidade_predominante), '', ''],
+    ],
+    theme: 'grid',
+    styles: { fontSize: 8.5, cellPadding: 2.5, textColor: DARK },
+    columnStyles: {
+      0: { fontStyle: 'bold', fillColor: [240, 245, 255], cellWidth: cW * 0.28 },
+      1: { cellWidth: cW * 0.22 },
+      2: { fontStyle: 'bold', fillColor: [240, 245, 255], cellWidth: cW * 0.28 },
+      3: { cellWidth: cW * 0.22 },
+    },
+    margin: { left: mg, right: mg },
+  });
+  y = doc.lastAutoTable.finalY + 6;
+
+  if (m.mediana != null) {
+    doc.setFillColor(...BLUE);
+    doc.rect(mg, y, cW, 16, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(8.5); doc.setFont('helvetica', 'normal');
+    doc.text('PREÇO DE REFERÊNCIA PROPOSTO  (mediana da amostra saneada)', pageW / 2, y + 6, { align: 'center' });
+    doc.setFontSize(15); doc.setFont('helvetica', 'bold');
+    doc.text(fmtR(m.mediana), pageW / 2, y + 13, { align: 'center' });
+    y += 21;
+  }
+  y += 3;
+
+  if (y > pageH - 60) { doc.addPage(); miniHeader('RELATÓRIO EXECUTIVO DE FORMAÇÃO DE PREÇO — TJPA/SEAD'); y = 18; }
+  y = secTitle('FUNDAMENTAÇÃO LEGAL', y);
+  doc.setFont('helvetica', 'normal'); doc.setTextColor(...DARK); doc.setFontSize(8);
+  [
+    'Pesquisa de preços realizada em conformidade com o art. 23 da Lei nº 14.133/2021 (Nova Lei de Licitações e',
+    'Contratos Administrativos) e com a Instrução Normativa SEGES/ME nº 65/2021, que estabelecem os critérios',
+    'para a pesquisa e apuração do preço de referência nas aquisições públicas.',
+    '',
+    'Os dados foram obtidos do sistema ComprasGov (CATMAT) do Ministério da Gestão e Inovação em Serviços',
+    'Públicos, contemplando contratações realizadas pela Administração Pública Federal.',
+    '',
+    'O saneamento estatístico aplicou o método iterativo de Z-Score para remoção de outliers, visando atingir',
+    'um Coeficiente de Variação (CV) ≤ 25%, conforme boas práticas e a IN 65/2021.',
+  ].forEach(l => { if (!l) { y += 2; return; } doc.text(l, mg, y); y += 4; });
+  y += 5;
+
+  if (y > pageH - 45) { doc.addPage(); miniHeader('RELATÓRIO EXECUTIVO DE FORMAÇÃO DE PREÇO — TJPA/SEAD'); y = 18; }
+  y = secTitle('RESPONSABILIDADE TÉCNICA', y);
+  const sW = (cW - 10) / 2;
+  doc.setDrawColor(...DARK); doc.setLineWidth(0.3);
+  doc.line(mg,            y + 15, mg + sW,            y + 15);
+  doc.line(mg + sW + 10, y + 15, mg + sW * 2 + 10,  y + 15);
+  doc.setFont('helvetica', 'normal'); doc.setTextColor(...DARK); doc.setFontSize(8);
+  doc.text('Responsável pela Pesquisa de Preços',     mg + sW / 2,           y + 19, { align: 'center' });
+  doc.text('Autoridade Competente',                   mg + sW + 10 + sW / 2, y + 19, { align: 'center' });
+  doc.setFontSize(7); doc.setTextColor(...GRAY);
+  doc.text('Nome / Matrícula / Cargo', mg + sW / 2,           y + 23, { align: 'center' });
+  doc.text('Nome / Matrícula / Cargo', mg + sW + 10 + sW / 2, y + 23, { align: 'center' });
+  y += 32;
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(...DARK);
+  doc.text('Belém (PA), _____ de _________________ de ' + now.getFullYear() + '.', pageW / 2, y, { align: 'center' });
+
+  /* ── PÁGINA 2 — REGISTROS DE PREÇO ── */
+  doc.addPage();
+  miniHeader('RELATÓRIO EXECUTIVO DE FORMAÇÃO DE PREÇO — TJPA/SEAD');
+  y = 18;
+
+  const recRows = precos.slice(0, 60);
+  y = secTitle('REGISTROS DE PREÇO — AMOSTRA SANEADA — ' + recRows.length + ' registro(s)', y);
+  doc.autoTable({
+    startY: y,
+    head: [['Data', 'Fornecedor', 'Preço Unit.', 'Qtd.', 'UASG / Órgão', 'UF']],
+    body: recRows.map(p => [
+      fmtDate(p.dataCompra),
+      (p.nomeFornecedor || '—').substring(0, 42),
+      fmtR(p.precoUnitario),
+      fmtN(p.quantidade),
+      (p.nomeUasg || p.codigoUasg || '—').substring(0, 38),
+      p.estado || '—',
+    ]),
+    theme: 'striped',
+    headStyles: { fillColor: BLUE, textColor: [255, 255, 255], fontSize: 8, fontStyle: 'bold' },
+    styles: { fontSize: 7.5, cellPadding: 2 },
+    columnStyles: {
+      0: { cellWidth: 22 },
+      1: { cellWidth: 60 },
+      2: { halign: 'right', cellWidth: 24 },
+      3: { halign: 'center', cellWidth: 12 },
+      4: { cellWidth: 48 },
+      5: { halign: 'center', cellWidth: 11 },
+    },
+    margin: { left: mg, right: mg },
+  });
+
+  /* ── Rodapé em todas as páginas ── */
+  const totalPgs = doc.internal.getNumberOfPages();
+  for (let i = 1; i <= totalPgs; i++) {
+    doc.setPage(i);
+    const pH = doc.internal.pageSize.getHeight();
+    doc.setFillColor(245, 247, 250);
+    doc.rect(0, pH - 9, pageW, 9, 'F');
+    doc.setFontSize(6.5); doc.setTextColor(...GRAY); doc.setFont('helvetica', 'normal');
+    doc.text('Gerado em: ' + dateStr + ' · Sistema Preço Justo — TJPA/SEAD · Dados: ComprasGov', mg, pH - 3);
+    doc.text('Página ' + i + ' de ' + totalPgs, pageW - mg, pH - 3, { align: 'right' });
+  }
+
+  const yyyy2 = now.getFullYear();
+  const mm2   = String(now.getMonth() + 1).padStart(2, '0');
+  const dd2   = String(now.getDate()).padStart(2, '0');
+  doc.save('RelatorioFormacaoPreco_' + (itemCode || 'item') + '_' + yyyy2 + mm2 + dd2 + '.pdf');
 }
