@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Detalhamento Estatístico — Divisão de Compras</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <header class="header">
+    <div class="header-bar">
+      <img src="img/thumbnail_image.png" alt="TJPA" class="logo tjpa-logo" decoding="async" fetchpriority="high">
+      <div class="title-center">
+        <h1>DIVISÃO DE COMPRAS</h1>
+        <h2>Detalhamento Estatístico</h2>
+      </div>
+      <img src="img/sead.png" alt="SEAD" class="logo sead-logo" decoding="async">
+    </div>
+  </header>
+
+  <main class="ae-page">
+
+    <!-- Loading -->
+    <div id="ae-loading" class="ae-loading">
+      <div class="ae-loading-spinner"></div>
+      <p>Processando análise estatística…<br><small>Aplicando algoritmo de saneamento (Z-Score iterativo)</small></p>
+    </div>
+
+    <!-- Erro -->
+    <div id="ae-error" class="ae-error hidden"></div>
+
+    <!-- ═══ CARD EXPORTÁVEL ═══ -->
+    <div id="summary-card" class="ae-summary-card hidden">
+
+      <!-- Cabeçalho do card -->
+      <div class="ae-card-header">
+        <div class="ae-card-header-left">
+          <span class="ae-card-badge">Análise Estatística · IN 65/2021</span>
+          <h2 id="ae-item-name" class="ae-item-name"></h2>
+        </div>
+        <div class="ae-price-hero">
+          <div class="ae-price-hero-label">Preço de Referência<br><small>(Mediana Saneada)</small></div>
+          <div class="ae-price-hero-value" id="ae-price-ref"></div>
+        </div>
+      </div>
+
+      <!-- Histograma -->
+      <div class="ae-section">
+        <div class="ae-section-title">Distribuição de Frequências — Amostra Válida</div>
+        <div id="ae-histogram" class="ae-histogram"></div>
+        <div class="ae-histogram-axis" id="ae-histogram-axis"></div>
+      </div>
+
+      <!-- Contadores -->
+      <div class="ae-counters">
+        <div class="ae-counter ae-counter--total">
+          <div class="ae-counter-value" id="cnt-total">—</div>
+          <div class="ae-counter-label">Total Encontrado</div>
+        </div>
+        <div class="ae-counter ae-counter--discarded">
+          <div class="ae-counter-value" id="cnt-discarded">—</div>
+          <div class="ae-counter-label">
+            Descartadas
+            <span class="ae-tooltip" tabindex="0" aria-label="Registros removidos por desvio estatístico">
+              ⓘ
+              <span class="ae-tooltip-text">Registros removidos pelo algoritmo Z-Score iterativo por estarem muito acima ou abaixo da média, distorcendo o preço de referência.</span>
+            </span>
+          </div>
+        </div>
+        <div class="ae-counter ae-counter--valid">
+          <div class="ae-counter-value" id="cnt-valid">—</div>
+          <div class="ae-counter-label">Amostra Válida (N)</div>
+        </div>
+        <div class="ae-counter ae-counter--cv">
+          <div class="ae-counter-value" id="cnt-cv">—</div>
+          <div class="ae-counter-label">CV Final <small>(limite: 25%)</small></div>
+        </div>
+      </div>
+
+      <!-- Barra de CV -->
+      <div class="ae-cv-bar">
+        <div class="ae-cv-bar-labels">
+          <span>0%</span><span>25% ← limite legal</span><span>50%+</span>
+        </div>
+        <div class="ae-cv-track">
+          <div id="ae-cv-fill" class="ae-cv-fill"></div>
+          <div class="ae-cv-limit-line" title="Limite IN 65/2021"></div>
+        </div>
+      </div>
+
+      <!-- Métricas secundárias -->
+      <div class="ae-metrics-row">
+        <div class="ae-metric"><span class="ae-metric-label">Média</span><span class="ae-metric-value" id="met-media">—</span></div>
+        <div class="ae-metric"><span class="ae-metric-label">Mediana</span><span class="ae-metric-value" id="met-mediana">—</span></div>
+        <div class="ae-metric"><span class="ae-metric-label">Desvio Padrão</span><span class="ae-metric-value" id="met-desvio">—</span></div>
+      </div>
+
+      <!-- Justificativa jurídica -->
+      <div id="ae-justification" class="ae-justification"></div>
+
+      <!-- Botão exportar -->
+      <div class="ae-card-actions">
+        <button id="btn-export" class="ae-export-btn">📥 Exportar Painel (PNG)</button>
+        <a href="javascript:history.back()" class="ae-back-btn">← Voltar</a>
+      </div>
+
+    </div>
+    <!-- /summary-card -->
+
+    <!-- ═══ TABELA DE RASTREABILIDADE ═══ -->
+    <div id="ae-table-section" class="ae-table-section hidden">
+      <div class="ae-table-header">
+        <h3>Amostra Válida — Rastreabilidade <span id="ae-table-count" class="ae-badge-count"></span></h3>
+        <div class="ae-table-controls">
+          <input type="text" id="ae-filter" class="ae-filter-input" placeholder="Filtrar por órgão, UF ou descrição…">
+        </div>
+      </div>
+
+      <div class="ae-table-wrap">
+        <table class="ae-data-table" id="ae-data-table">
+          <thead>
+            <tr>
+              <th class="sortable" data-key="precoUnitario">Valor Unit. <span class="sort-icon">↕</span></th>
+              <th class="sortable" data-key="dataCompra">Data <span class="sort-icon">↕</span></th>
+              <th class="sortable" data-key="quantidade">Qtd <span class="sort-icon">↕</span></th>
+              <th>Unidade</th>
+              <th class="sortable" data-key="estado">UF <span class="sort-icon">↕</span></th>
+              <th>Órgão Comprador</th>
+              <th>Acesso</th>
+            </tr>
+          </thead>
+          <tbody id="ae-table-body"></tbody>
+        </table>
+      </div>
+
+      <div class="ae-pagination" id="ae-pagination"></div>
+    </div>
+
+    <!-- ═══ COMPRAS DESCARTADAS (colapsável) ═══ -->
+    <details id="ae-discarded-section" class="ae-discarded-section hidden">
+      <summary>
+        🗑️ Compras Descartadas pelo Algoritmo
+        <span id="ae-discarded-count" class="ae-badge-count ae-badge-discarded"></span>
+      </summary>
+      <div class="ae-table-wrap">
+        <table class="ae-data-table ae-data-table--discarded" id="ae-discarded-table">
+          <thead>
+            <tr>
+              <th>Valor Unit.</th>
+              <th>Data</th>
+              <th>UF</th>
+              <th>Órgão Comprador</th>
+              <th>Motivo do Descarte</th>
+              <th>Iteração</th>
+            </tr>
+          </thead>
+          <tbody id="ae-discarded-body"></tbody>
+        </table>
+      </div>
+    </details>
+
+  </main>
+
+  <footer class="footer"><p>© 2025 Divisão de Compras</p></footer>
+
+  <script src="analise-estatistica.js?v=1"></script>
+</body>
+</html>

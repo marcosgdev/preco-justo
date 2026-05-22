@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Assistente de Cotação — Divisão de Compras</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <header class="header">
+    <div class="header-bar">
+      <img src="img/thumbnail_image.png" alt="Poder Judiciário — Tribunal de Justiça do Estado do Pará"
+           class="logo tjpa-logo" decoding="async" fetchpriority="high">
+      <div class="title-center">
+        <h1>DIVISÃO DE COMPRAS</h1>
+        <h2>Assistente de Cotação</h2>
+      </div>
+      <img src="img/sead.png" alt="SEAD — Secretaria de Administração"
+           class="logo sead-logo" decoding="async">
+    </div>
+  </header>
+
+  <main class="chat-page">
+    <div class="chat-wrapper">
+
+      <div class="chat-container">
+
+        <!-- Mensagens -->
+        <div class="chat-messages" id="chat-messages"
+             aria-live="polite" aria-label="Conversa com o assistente">
+        </div>
+
+        <!-- Sugestões rápidas -->
+        <div class="chat-suggestions hidden" id="chat-suggestions"></div>
+
+        <!-- Input -->
+        <form class="chat-input-area" id="chat-form" autocomplete="off">
+          <textarea
+            id="chat-input"
+            class="chat-textarea"
+            placeholder="Digite o item que precisa cotar ou sua dúvida..."
+            rows="1"
+            aria-label="Mensagem para o assistente"
+          ></textarea>
+          <button type="submit" class="chat-send-btn" id="chat-send" aria-label="Enviar mensagem">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
+              <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+            </svg>
+          </button>
+        </form>
+
+        <!-- Rodapé do chat -->
+        <div class="chat-footer-bar">
+          <a href="index.html" class="chat-back-link">← Voltar ao menu</a>
+          <span class="chat-powered">GPT-4o · Dados ComprasGov</span>
+        </div>
+
+      </div>
+    </div>
+  </main>
+
+  <footer class="footer">
+    <p>© 2025 Divisão de Compras</p>
+  </footer>
+
+  <script src="chatbot.js?v=1"></script>
+</body>
+</html>

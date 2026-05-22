@@ -208,13 +208,13 @@ function compraUrl(id) {
 
 
   // Seus deploys GAS
-  const BACKEND_PRICES_URL    = 'https://script.google.com/macros/s/AKfycbwaCjqYmd1hD-4aUFeOv9kyUwW7PD7Nq8_qn8-Wk97tW8u3JDyYtO7A8WymnX0KfJD3/exec';
+  const BACKEND_PRICES_URL    = 'https://script.google.com/macros/s/AKfycbx6pV8wX3UBYl9rhs2W1IX5Hn3SxUTEEvL0o2wS9_TNZnjRuCBNpTLnbYpXZjIdsgFK/exec';
   const BACKEND_SUPPLIERS_URL = 'https://script.google.com/macros/s/AKfycbytIZagCuuzHmxOV3GSmFnPvcl8jtnMIR3BeMCFIjILmX-qLZVvotiNnlw1Kbpdqh0k/exec';
 
   const MAX_PAGINAS_PADRAO = 2;
   let inflightCtrl = null;
 
-  /* ── Autocomplete de catálogo ── */
+  /* ── Autocomplete de catálogo (multi-seleção até 10 itens) ── */
   (function initCatalogAutocomplete() {
     const searchInput  = document.getElementById('catalog_search');
     const dropdown     = document.getElementById('catalog-dropdown');
@@ -224,39 +224,89 @@ function compraUrl(id) {
     const btnPesquisa  = document.getElementById('btn-pesquisa');
     if (!searchInput || !dropdown) return;
 
+    const MAX_ITEMS = 10;
+    let selectedItems = [];
     let debounceTimer = null;
     let activeIdx = -1;
     let currentItems = [];
 
-    function clearSelection() {
-      catmatHidden.value = '';
+    function renderChips() {
+      catmatHidden.value = selectedItems.map(i => i.codigo).join(',');
       catserHidden.value = '';
-      if (btnPesquisa) btnPesquisa.disabled = true;
-      if (badgeEl) badgeEl.classList.add('hidden');
+      if (btnPesquisa) btnPesquisa.disabled = selectedItems.length === 0;
+      if (!badgeEl) return;
+      if (!selectedItems.length) { badgeEl.classList.add('hidden'); badgeEl.innerHTML = ''; return; }
+      badgeEl.classList.remove('hidden');
+      badgeEl.innerHTML =
+        `<div class="sel-chips">${selectedItems.map((item, i) => {
+          const tags = buildMetaTags(item);
+          const metaHtml = tags.length
+            ? `<span class="sel-meta">${escapeHTML(tags.slice(0, 3).map(t => t.label).join(' · '))}</span>`
+            : '';
+          return `<span class="sel-chip">
+            <span class="sel-code">CATMAT ${escapeHTML(item.codigo)}</span>
+            <span class="sel-desc">${escapeHTML(item.descricao)}${item.unidade ? ' — ' + escapeHTML(item.unidade) : ''}</span>
+            ${metaHtml}
+            <button type="button" class="sel-clear" data-idx="${i}" title="Remover">✕</button>
+          </span>`;
+        }).join('')}
+        </div>
+        <div class="sel-counter">${selectedItems.length}/${MAX_ITEMS} ${selectedItems.length === 1 ? 'item selecionado' : 'itens selecionados'}</div>`;
+      badgeEl.querySelectorAll('.sel-clear').forEach(btn => {
+        btn.addEventListener('click', () => { selectedItems.splice(+btn.dataset.idx, 1); renderChips(); });
+      });
+      window.__selectedItems = selectedItems.slice();
     }
 
     function selectItem(item) {
-      catmatHidden.value = item.codigo;
-      catserHidden.value = '';
-      if (btnPesquisa) btnPesquisa.disabled = false;
+      if (selectedItems.some(i => i.codigo === item.codigo)) { closeDropdown(); searchInput.value = ''; return; }
+      if (selectedItems.length >= MAX_ITEMS) return;
+      selectedItems.push(item);
+      renderChips();
       closeDropdown();
-      searchInput.value = item.descricao;
-      if (badgeEl) {
-        badgeEl.classList.remove('hidden');
-        badgeEl.innerHTML = `
-          <span class="sel-code">CATMAT ${escapeHTML(item.codigo)}</span>
-          <span class="sel-desc">${escapeHTML(item.descricao)}${item.unidade ? ' — ' + escapeHTML(item.unidade) : ''}</span>
-          <button type="button" class="sel-clear" title="Limpar seleção">✕</button>`;
-        badgeEl.querySelector('.sel-clear').addEventListener('click', () => {
-          clearSelection();
-          searchInput.value = '';
-          searchInput.focus();
-        });
-      }
+      searchInput.value = '';
+      searchInput.focus();
     }
 
     function openDropdown()  { dropdown.classList.add('open'); }
     function closeDropdown() { dropdown.classList.remove('open'); activeIdx = -1; }
+
+    function buildMetaTags(it) {
+      const tags = [];
+      // 1) Array genérico de características (qualquer tipo de material)
+      const chars = it.caracteristicas || it.characteristics || it.atributos || null;
+      if (Array.isArray(chars) && chars.length) {
+        for (const c of chars) {
+          const nome = c.nome || c.name || c.chave || c.key || '';
+          const valor = c.valor || c.value || c.descricao || c.description || '';
+          if (nome && valor) tags.push({ label: `${nome}: ${valor}` });
+        }
+      } else if (chars && typeof chars === 'object') {
+        for (const [k, v] of Object.entries(chars)) {
+          if (v) tags.push({ label: `${k}: ${v}` });
+        }
+      }
+      // 2) Campos individuais nomeados (fallback / backward compat)
+      if (!tags.length) {
+        const pairs = [
+          ['Composição',       it.composicao  || it.composição  || it.composition || ''],
+          ['Concentração',     it.concentracao || it.concentração || it.concentration || ''],
+          ['Forma Farmacêutica', it.formaFarmaceutica || it.forma_farmaceutica || ''],
+          ['Adicional',        it.adicional   || it.additional || ''],
+          ['Gramatura',        it.gramatura   || ''],
+          ['Cor',              it.cor         || ''],
+          ['Formato',          it.formato     || ''],
+          ['Material',         it.material    || ''],
+          ['Capacidade',       it.capacidade  || ''],
+          ['Voltagem',         it.voltagem    || ''],
+          ['NCM',              it.ncm         || ''],
+        ];
+        for (const [nome, valor] of pairs) {
+          if (valor) tags.push({ label: `${nome}: ${valor}` });
+        }
+      }
+      return tags;
+    }
 
     function renderItems(items) {
       currentItems = items;
@@ -265,12 +315,21 @@ function compraUrl(id) {
         dropdown.innerHTML = '<div class="catalog-dropdown-msg">Nenhum item encontrado.</div>';
         openDropdown(); return;
       }
-      dropdown.innerHTML = items.map((it, i) => `
-        <div class="catalog-item" data-idx="${i}">
-          <span class="catalog-item__code">CATMAT ${escapeHTML(it.codigo)}</span>
+      dropdown.innerHTML = items.map((it, i) => {
+        const tags = buildMetaTags(it);
+        const metaHtml = tags.length
+          ? `<div class="catalog-item__meta">${tags.map(t => `<span class="catalog-item__meta-tag">${escapeHTML(t.label)}</span>`).join('')}</div>`
+          : '';
+        return `
+        <div class="catalog-item${selectedItems.some(s => s.codigo === it.codigo) ? ' already-selected' : ''}" data-idx="${i}">
+          <div class="catalog-item__header">
+            <span class="catalog-item__code">CATMAT ${escapeHTML(it.codigo)}</span>
+            ${it.unidade ? `<span class="catalog-item__unit">${escapeHTML(it.unidade)}</span>` : ''}
+          </div>
           <span class="catalog-item__desc">${escapeHTML(it.descricao)}</span>
-          ${it.unidade ? `<span class="catalog-item__unit">${escapeHTML(it.unidade)}</span>` : ''}
-        </div>`).join('');
+          ${metaHtml}
+        </div>`;
+      }).join('');
       dropdown.querySelectorAll('.catalog-item').forEach(el => {
         el.addEventListener('mousedown', (e) => { e.preventDefault(); selectItem(currentItems[+el.dataset.idx]); });
       });
@@ -295,7 +354,6 @@ function compraUrl(id) {
     }
 
     searchInput.addEventListener('input', () => {
-      clearSelection();
       const q = searchInput.value.trim();
       clearTimeout(debounceTimer);
       if (q.length < 3) { closeDropdown(); return; }
@@ -425,6 +483,60 @@ function compraUrl(id) {
     }
   });
 
+  /* ---------- helper: monta tabela HTML ---------- */
+  function buildTable(rows) {
+    const LIMIT = 15;
+    if (!rows || !rows.length) return '<p style="padding:12px;color:#666">Nenhum registro.</p>';
+
+    function buildRow(item) {
+      const precoTxt = typeof item.precoUnitario === 'number'
+        ? item.precoUnitario.toLocaleString('pt-BR', { style:'currency', currency:'BRL' })
+        : (item.precoUnitario || 'N/A');
+      const dataTxt = item.dataCompra ? new Date(item.dataCompra).toLocaleDateString('pt-BR') : 'N/A';
+      const isOut = !!item.isOutlier;
+      const idCompraVal = (item.idCompra ?? '').toString().trim();
+      const href = item.linkCompra ? safeURL(item.linkCompra) : compraUrl(idCompraVal);
+      const idContent = idCompraVal
+        ? `<a href="${href}" target="_blank" rel="noopener noreferrer">${escapeHTML(idCompraVal)}</a>`
+        : 'N/A';
+      const accessBtn = href && idCompraVal
+        ? `<a href="${href}" target="_blank" rel="noopener noreferrer" class="btn-access-item">↗ Acessar</a>`
+        : '—';
+      return `<tr${isOut ? ' class="outlier-row"' : ''}>
+        <td>${idContent}<span class="tag-curve">${escapeHTML(item.curva||'N/D')}</span></td>
+        <td>${escapeHTML(item.descricaoItem||'N/A')}${isOut?' <span class="tag-outlier">🚩 Outlier</span>':''}</td>
+        <td>${precoTxt}</td><td>${item.quantidade??'N/A'}</td><td>${dataTxt}</td>
+        <td>${escapeHTML(item.nomeFornecedor||'N/A')}</td>
+        <td>${escapeHTML(item.codigoUasg||'N/A')} ${escapeHTML(item.nomeUasg||'')}</td>
+        <td>${escapeHTML(item.estado||'N/A')}</td>
+        <td class="td-access">${accessBtn}</td>
+      </tr>`;
+    }
+
+    const visible = rows.slice(0, LIMIT);
+    const extra   = rows.slice(LIMIT);
+
+    const thead = `<thead><tr>
+      <th>ID Compra</th><th>Descrição do Item</th><th>Preço Unitário</th>
+      <th>Qtd</th><th>Data</th><th>Fornecedor</th><th>UASG</th><th>UF</th><th>Acessar</th>
+    </tr></thead>`;
+
+    let t = `<div class="table-wrap">`;
+    t += `<div class="table-count">Exibindo ${visible.length} de ${rows.length} registros</div>`;
+    t += `<div class="table-scroll"><table class="results-table">${thead}<tbody>`;
+    t += visible.map(buildRow).join('');
+    t += '</tbody>';
+    if (extra.length) {
+      t += `<tbody class="rows-extra" hidden>${extra.map(buildRow).join('')}</tbody>`;
+    }
+    t += '</table></div>';
+    if (extra.length) {
+      t += `<button type="button" class="btn-show-more">Mostrar todos os ${rows.length} registros ▾</button>`;
+    }
+    t += '</div>';
+    return t;
+  }
+
   /* ---------- tabela (preços) ---------- */
   function displayResults(precos) {
     if (!precos || precos.length === 0) {
@@ -432,27 +544,87 @@ function compraUrl(id) {
       return;
     }
 
-    const groups = { A: [], B: [], C: [], 'N/D': [] };
-    precos.forEach(p => {
-      const k = (p && typeof p.curva === 'string' && ['A','B','C'].includes(p.curva)) ? p.curva : 'N/D';
-      groups[k].push(p);
-    });
-
+    const data   = window.__lastData;
+    const grupos = data && Array.isArray(data.grupos) && data.grupos.length ? data.grupos : null;
     let html = '';
 
-    if (window.__lastSummary) {
-      html += `
-        <div class="results-summary" aria-live="polite">
-          <strong>Resumo:</strong> ${escapeHTML(window.__lastSummary)}
-        </div>`;
-    }
+    if (grupos) {
+      /* ── Card por material ── */
+      grupos.forEach(grupo => {
+        const rec  = grupo.recommended;
+        const cs   = rec && grupo.curveStats ? grupo.curveStats[rec.curve] : null;
+        const refPrice   = cs ? cs.median : null;
+        const refPriceTxt = refPrice != null
+          ? refPrice.toLocaleString('pt-BR', { style:'currency', currency:'BRL' }) : 'N/D';
+        const cvTxt = cs?.cv != null ? `${Number(cs.cv).toFixed(1)}%` : 'N/D';
 
-    if (window.__recommended && window.__recommended.curve) {
-      const rec = window.__recommended;
-      const cvTxt = (rec.stats?.cv != null) ? `${Number(rec.stats.cv).toFixed(1)}%` : 'N/D';
-      const nTxt  = (rec.stats?.n  != null) ? rec.stats.n : 'N/D';
-      html += `
-        <div class="recommendation-card">
+        const selItem   = (window.__selectedItems || []).find(s => s.codigo === String(grupo.pdm));
+        const nomeMat   = selItem ? selItem.descricao : `PDM ${grupo.pdm}`;
+        const unidadeTxt = selItem?.unidade ? ` — ${selItem.unidade}` : '';
+
+        html += `<div class="material-card">
+          <div class="material-card-header">
+            <span class="material-name">${escapeHTML(nomeMat)}${escapeHTML(unidadeTxt)}</span>
+            <span class="material-total">${grupo.precos.length} registro(s)</span>
+          </div>`;
+
+        if (rec && refPrice != null) {
+          const conf = rec.confidence || 'alta';
+          const confLabels = { alta: '✔ Alta confiança', media: '⚠ Confiança média', baixa: '⚠ Confiança baixa' };
+          const confHints  = { alta: '', media: ' — CV acima de 25%, use como referência inicial', baixa: ' — alta dispersão de preços, pesquise especificações mais detalhadas' };
+          html += `<div class="ref-price-banner conf-${escapeHTML(conf)}">
+            <div class="ref-price-left">
+              <div class="ref-price-label">
+                Preço de Referência — Curva ${escapeHTML(rec.curve)}
+                <span class="confidence-badge">${confLabels[conf]}</span>
+              </div>
+              <div class="ref-price-meta">Mediana • CV ${cvTxt} • ${cs.n} contratação(ões)${confHints[conf]}</div>
+            </div>
+            <div class="ref-price-value">${refPriceTxt}</div>
+          </div>`;
+        } else {
+          html += `<div class="ref-price-banner ref-price-no-rec">
+            ⚠ Dados insuficientes para recomendação (CV &gt; 25% ou menos de 3 registros por curva)
+          </div>`;
+        }
+
+        if (rec) {
+          const recRows = grupo.precos.filter(p => p.curva === rec.curve);
+          if (recRows.length) {
+            html += `<details class="material-details" open>
+              <summary>Curva ${escapeHTML(rec.curve)} — ${recRows.length} registro(s) — Recomendada</summary>
+              ${buildTable(recRows)}
+            </details>`;
+          }
+        }
+
+        const otherRows = grupo.precos.filter(p => !rec || p.curva !== rec.curve);
+        if (otherRows.length) {
+          html += `<details class="material-details">
+            <summary>Demais registros (${otherRows.length})</summary>
+            ${buildTable(otherRows)}
+          </details>`;
+        }
+
+        html += '</div>';
+      });
+
+    } else {
+      /* ── Layout legado (item único / GAS antigo) ── */
+      const groups = { A:[], B:[], C:[], 'N/D':[] };
+      precos.forEach(p => {
+        const k = (p && typeof p.curva === 'string' && ['A','B','C'].includes(p.curva)) ? p.curva : 'N/D';
+        groups[k].push(p);
+      });
+
+      if (window.__lastSummary) {
+        html += `<div class="results-summary" aria-live="polite"><strong>Resumo:</strong> ${escapeHTML(window.__lastSummary)}</div>`;
+      }
+
+      if (window.__recommended?.curve) {
+        const rec   = window.__recommended;
+        const cvTxt = rec.stats?.cv != null ? `${Number(rec.stats.cv).toFixed(1)}%` : 'N/D';
+        html += `<div class="recommendation-card">
           <div class="recommendation-icon">★</div>
           <div class="recommendation-content">
             <strong>Curva recomendada:</strong> Curva <b>${escapeHTML(rec.curve)}</b>
@@ -460,89 +632,44 @@ function compraUrl(id) {
             <div class="recommendation-meta">
               <span><b>Critérios:</b> CV ≤ 25% e ≥ 3 contratações</span>
               <span class="dot">•</span>
-              <span><b>Métricas:</b> CV ${cvTxt}, n=${nTxt}</span>
-              ${rec.reason ? `<span class="dot">•</span><span><b>Motivo:</b> ${escapeHTML(rec.reason)}</span>` : ''}
+              <span><b>Métricas:</b> CV ${cvTxt}, n=${rec.stats?.n ?? 'N/D'}</span>
             </div>
           </div>
         </div>`;
-    }
+      }
 
-    const meta = window.__curveMeta;
-    if (meta && typeof meta.t1 === 'number' && typeof meta.t2 === 'number') {
-      const t1 = meta.t1.toLocaleString('pt-BR', { style:'currency', currency:'BRL' });
-      const t2 = meta.t2.toLocaleString('pt-BR', { style:'currency', currency:'BRL' });
-      html += `
-        <div class="curve-meta">
+      const meta = window.__curveMeta;
+      if (meta?.t1 != null) {
+        const t1 = meta.t1.toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+        const t2 = meta.t2.toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+        html += `<div class="curve-meta">
           <span><strong>Curva A</strong>: ≤ ${t1}</span>
           <span><strong>Curva B</strong>: entre ${t1} e ${t2}</span>
           <span><strong>Curva C</strong>: > ${t2}</span>
         </div>`;
+      }
+
+      ['A','B','C','N/D'].forEach(curva => {
+        const arr = groups[curva];
+        if (!arr?.length) return;
+        const isRec = window.__recommended?.curve === curva;
+        const title = curva === 'N/D' ? 'Sem Curva (valor inválido)' : `Curva ${curva}`;
+        html += `<h4 class="curve-header">${title} <span class="badge">${arr.length}</span>${isRec?' <span class="recommendation-badge">Recomendada</span>':''}</h4>`;
+        html += buildTable(arr);
+      });
     }
 
-    ['A','B','C','N/D'].forEach(curva => {
-      const arr = groups[curva];
-      if (!arr || arr.length === 0) return;
+    resultsContainer.innerHTML = html;
 
-      const isRec = window.__recommended && window.__recommended.curve === curva;
-      const title = curva === 'N/D' ? 'Sem Curva (valor inválido)' : `Curva ${curva}`;
-      html += `<h4 class="curve-header">${title} <span class="badge">${arr.length}</span>${isRec ? ' <span class="recommendation-badge">Recomendada</span>' : ''}</h4>`;
-
-      html += `
-        <table class="results-table">
-          <thead>
-            <tr>
-              <th>ID Compra</th>
-              <th>Descrição do Item</th>
-              <th>Preço Unitário</th>
-              <th>Quantidade</th>
-              <th>Data da Compra</th>
-              <th>Fornecedor</th>
-              <th>Código UASG</th>
-              <th>Nome da UASG</th>
-              <th>Estado</th>
-              <th>Acessar</th>
-            </tr>
-          </thead>
-          <tbody>`;
-
-      arr.forEach(item => {
-        const precoUnitario = (typeof item.precoUnitario === 'number')
-          ? item.precoUnitario.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-          : (item.precoUnitario || 'N/A');
-        const dataCompra = item.dataCompra ? new Date(item.dataCompra).toLocaleDateString('pt-BR') : 'N/A';
-        const isOut = !!item.isOutlier;
-        const trClass = isOut ? ' class="outlier-row"' : '';
-        const titleRow = isOut ? ' title="Valor fora do padrão (outlier)"' : '';
-const idCompraVal = (item.idCompra ?? '').toString().trim();
-const href = item.linkCompra ? safeURL(item.linkCompra) : compraUrl(idCompraVal);
-
-const idContent = idCompraVal
-  ? `<a href="${href}" target="_blank" rel="noopener noreferrer">${escapeHTML(idCompraVal)}</a>`
-  : 'N/A';
-
-const accessBtn = href && idCompraVal
-  ? `<a href="${href}" target="_blank" rel="noopener noreferrer" class="btn-access-item" title="Acessar item no ComprasNet">↗ Acessar</a>`
-  : '—';
-
-        html += `<tr${trClass}${titleRow}>
-  <td>${idContent}<span class="tag-curve">${escapeHTML(item.curva || 'N/D')}</span></td>
-  <td>${escapeHTML(item.descricaoItem || 'N/A')}${isOut ? ' <span class="tag-outlier">🚩 Outlier</span>' : ''}</td>
-  <td>${precoUnitario}</td>
-  <td>${(item.quantidade ?? 'N/A')}</td>
-  <td>${dataCompra}</td>
-  <td>${escapeHTML(item.nomeFornecedor || 'N/A')}</td>
-  <td>${escapeHTML(item.codigoUasg || 'N/A')}</td>
-  <td>${escapeHTML(item.nomeUasg || 'N/A')}</td>
-  <td>${escapeHTML(item.estado || 'N/A')}</td>
-  <td class="td-access">${accessBtn}</td>
-</tr>`;
-
+    resultsContainer.querySelectorAll('.btn-show-more').forEach(btn => {
+      btn.addEventListener('click', () => {
+        btn.closest('.table-wrap').querySelectorAll('.rows-extra').forEach(el => { el.hidden = false; });
+        const total = btn.closest('.table-wrap').querySelectorAll('tr').length - 1; // minus thead
+        btn.closest('.table-wrap').querySelector('.table-count').textContent = `Exibindo ${total} de ${total} registros`;
+        btn.remove();
       });
-
-      html += `</tbody></table>`;
     });
 
-    resultsContainer.innerHTML = html;
     ensureSuppliersSection();
   }
 
@@ -609,8 +736,20 @@ const accessBtn = href && idCompraVal
     btnAnalyze.rel = 'noopener';
     btnAnalyze.textContent = 'Ir para Análise de Mercado';
 
+    const selItem = (window.__selectedItems || []).find(s => s.codigo === String(code)) || (window.__selectedItems || [])[0];
+    const descItem = selItem ? selItem.descricao : '';
+    const qEst = new URLSearchParams({ type, code });
+    if (descItem) qEst.set('desc', descItem);
+    const btnEstat = document.createElement('a');
+    btnEstat.className = 'submit-button btn-go-estatistica';
+    btnEstat.href = `analise-estatistica.html?${qEst.toString()}`;
+    btnEstat.target = '_self';
+    btnEstat.rel = 'noopener';
+    btnEstat.textContent = 'Detalhamento Estatístico';
+
     wrap.appendChild(btnExport);
     wrap.appendChild(btnAnalyze);
+    wrap.appendChild(btnEstat);
     resultsContainer.appendChild(wrap);
   }
   function removeGoToAnalysisButton(){
