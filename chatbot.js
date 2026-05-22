@@ -4,8 +4,8 @@
    ================================================================= */
 
 /* ── Configuração ── */
-const CHAT_GAS_URL  = 'https://script.google.com/macros/s/AKfycbyWO7ROSqDk8YLP3prk20Gj4mGaiQAY3Dmg0l7CBknhf0gg2_UcHqaX6-HbmaCGkpew/exec';
-const MAX_HISTORY   = 12; // últimas N mensagens enviadas (controle de custo)
+const CHAT_GAS_URL  = 'https://script.google.com/macros/s/AKfycbwfIbAXR2P0lwamsunl46dJR81Aw8jFMdZBLTjYGD6u2ZXfD9sMaWjaM9uiFaBwTeQk/exec';
+const MAX_HISTORY   = 6; // últimas N mensagens enviadas (limite 30k tokens GPT-4o)
 
 /* ── Estado ── */
 const chatState = {
@@ -67,7 +67,7 @@ function showWelcome() {
   );
   showSuggestions([
     '📦 Pesquisar preço de um material',
-    '💊 Cotar medicamentos',
+    '📄 Gerar Relatório SEI',
     '🏢 Encontrar fornecedores',
     '❓ Como funciona?'
   ]);
@@ -166,6 +166,7 @@ function buildActions(data) {
     const descParam = data.priceData?.item_pesquisado
       ? '&desc=' + encodeURIComponent(data.priceData.item_pesquisado) : '';
     actions.push({ label: '🔍 Ver cotação completa',    href: `cotacao-rapida.html?catmat=${param}` });
+    actions.push({ label: '📄 Relatório SEI (PDF)',     href: `cotacao-rapida.html?catmat=${param}&pdf=auto` });
     actions.push({ label: '📊 Análise de mercado',      href: `analise-mercado.html?type=catmat&code=${param}` });
     actions.push({ label: '📈 Detalhamento Estatístico', href: `analise-estatistica.html?type=catmat&code=${param}${descParam}` });
   }

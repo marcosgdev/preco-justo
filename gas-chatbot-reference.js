@@ -546,7 +546,10 @@ function chatAssistente(messagesJson) {
           toolResult = { erro: e.message || String(e) };
         }
 
-        messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(toolResult) });
+        // Limita o conteúdo da tool a ~6000 chars para não estourar o limite de tokens
+        var toolJson = JSON.stringify(toolResult);
+        if (toolJson.length > 6000) toolJson = toolJson.slice(0, 6000) + '…(truncado)"}';
+        messages.push({ role: 'tool', tool_call_id: call.id, content: toolJson });
       }
       continue;
     }
@@ -587,7 +590,7 @@ function _chatToolCatalog(query) {
     return { itens: [], mensagem: catResult.message || 'Nenhum item encontrado.' };
   }
 
-  var pdmItems = catResult.items.slice(0, 6); // até 6 PDMs
+  var pdmItems = catResult.items.slice(0, 3); // até 3 PDMs (limite de tokens)
 
   // 2) Para cada PDM, busca os itens CATMAT com características
   var enriched = [];
@@ -607,12 +610,13 @@ function _chatToolCatalog(query) {
         if (Array.isArray(data)) {
           catmatItens = data
             .filter(function(d) { return d.statusItem && !d.itemSuspenso && d.codigoItem; })
-            .slice(0, 8)
+            .slice(0, 4) // máx 4 itens por PDM (limite de tokens)
             .map(function(d) {
               // Extrai características dinamicamente (qualquer tipo de material)
               var chars = [];
               if (Array.isArray(d.caracteristicas)) {
                 d.caracteristicas.forEach(function(c) {
+                  if (chars.length >= 4) return; // máx 4 características
                   var nome  = c.nomeCaracteristica  || c.nome  || c.name  || c.chave || '';
                   var valor = c.valorCaracteristica || c.valor || c.value || '';
                   if (nome && valor) chars.push(nome + ': ' + valor);
@@ -631,7 +635,7 @@ function _chatToolCatalog(query) {
                   ['Material', d.material || ''],
                   ['NCM', d.ncm || d.codigoNcm || '']
                 ];
-                campos.forEach(function(p) { if (p[1]) chars.push(p[0] + ': ' + p[1]); });
+                campos.forEach(function(p) { if (p[1] && chars.length < 4) chars.push(p[0] + ': ' + p[1]); });
               }
               return {
                 codigo_catmat: String(d.codigoItem),
@@ -692,35 +696,28 @@ function _chatToolDetalhar(codigoPdm) {
 
     var itens = data
       .filter(function(d) { return d.statusItem && !d.itemSuspenso && d.codigoItem; })
+      .slice(0, 8) // máx 8 variações (limite de tokens)
       .map(function(d) {
-        // Extrai características estruturadas (array)
+        // Extrai características estruturadas (array), máx 6
         var chars = {};
+        var charCount = 0;
         if (Array.isArray(d.caracteristicas)) {
           d.caracteristicas.forEach(function(c) {
+            if (charCount >= 6) return;
             var nome  = c.nomeCaracteristica  || c.nome  || c.name  || c.chave || '';
             var valor = c.valorCaracteristica || c.valor || c.value || '';
-            if (nome && valor) chars[nome] = valor;
+            if (nome && valor) { chars[nome] = valor; charCount++; }
           });
         }
 
-        // Captura TODOS os campos diretos do objeto (qualquer material)
-        var camposDiretos = {};
-        Object.keys(d).forEach(function(k) {
-          if (!IGNORAR[k] && k !== 'caracteristicas') {
-            var v = d[k];
-            if (v !== null && v !== undefined && v !== '') camposDiretos[k] = v;
-          }
-        });
-
         return {
-          codigo_catmat:    String(d.codigoItem),
-          nome:             d.nomeItem || d.descricao || d.nome || '',
-          caracteristicas:  Object.keys(chars).length ? chars : null,
-          campos_adicionais: Object.keys(camposDiretos).length ? camposDiretos : null
+          codigo_catmat:   String(d.codigoItem),
+          nome:            d.nomeItem || d.descricao || d.nome || '',
+          caracteristicas: Object.keys(chars).length ? chars : null
         };
       });
 
-    return { codigo_pdm: codigoPdm, total_variações: itens.length, itens: itens };
+    return { codigo_pdm: codigoPdm, total_variacoes: itens.length, itens: itens };
   } catch(e) {
     return { erro: e.message };
   }

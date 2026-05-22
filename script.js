@@ -1510,4 +1510,33 @@ installCopyHandler(document);
     doc.save('RelatorioFormacaoPreco_' + (itemCode || 'item') + '_' + yyyy2 + mm2 + dd2 + '.pdf');
   }
 
+  /* ── Auto-search via URL params (links do chatbot) ── */
+  (function () {
+    const sp     = new URLSearchParams(location.search);
+    const catmat = sp.get('catmat');
+    if (!catmat) return;
+
+    const hiddenCatmat = document.getElementById('catmat_code');
+    const btnPesquisa  = document.getElementById('btn-pesquisa');
+    if (!hiddenCatmat || !btnPesquisa) return;
+
+    hiddenCatmat.value    = catmat;
+    btnPesquisa.disabled  = false;
+
+    const searchInput = document.getElementById('catalog_search');
+    if (searchInput) searchInput.placeholder = 'Código CATMAT: ' + catmat;
+
+    setTimeout(() => {
+      form.dispatchEvent(new Event('submit'));
+
+      if (sp.get('pdf') === 'auto') {
+        const obs = new MutationObserver(() => {
+          const btnPDF = document.querySelector('.btn-export-pdf');
+          if (btnPDF) { obs.disconnect(); btnPDF.click(); }
+        });
+        obs.observe(document.getElementById('results-container'), { childList: true, subtree: true });
+      }
+    }, 150);
+  })();
+
 });
